@@ -11,17 +11,18 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union, cast
 
 from requests import Response
+from requests.structures import CaseInsensitiveDict
 
 from jira.resilientsession import ResilientSession
-from jira.utils import CaseInsensitiveDict, json_loads, threaded_requests
+from jira.utils import json_loads, threaded_requests
 
 if TYPE_CHECKING:
     from jira.client import JIRA
 
-    MyAny = Any
+    AnyLike = Any
 else:
 
-    class MyAny(object):
+    class AnyLike(object):
         """Dummy subclass of base object class for when type checker is not running."""
 
         pass
@@ -583,7 +584,7 @@ class Filter(Resource):
 class Issue(Resource):
     """A Jira issue."""
 
-    class _IssueFields(MyAny):
+    class _IssueFields(AnyLike):
         class _Comment(object):
             def __init__(self) -> None:
                 self.comments: List[Comment] = []
