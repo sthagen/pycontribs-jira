@@ -47,7 +47,7 @@ idna==2.10
     # via requests
 imagesize==1.2.0
     # via sphinx
-importlib-metadata==4.5.0
+importlib-metadata==4.6.1
     # via
     #   keyring
     #   pluggy
@@ -136,7 +136,7 @@ pytz==2021.1
     # via babel
 pyyaml==5.4.1
     # via jira (setup.cfg)
-requests==2.25.1
+requests==2.26.0
     # via
     #   jira (setup.cfg)
     #   requests-futures
@@ -168,7 +168,7 @@ six==1.16.0
     #   traitlets
 snowballstemmer==2.1.0
     # via sphinx
-sphinx==4.1.1
+sphinx==4.1.2
     # via
     #   jira (setup.cfg)
     #   sphinx-rtd-theme
@@ -186,7 +186,7 @@ sphinxcontrib-qthelp==1.0.3
     # via sphinx
 sphinxcontrib-serializinghtml==1.1.5
     # via sphinx
-tenacity==7.0.0
+tenacity==8.0.1
     # via jira (setup.cfg)
 termcolor==1.1.0
     # via pytest-sugar
