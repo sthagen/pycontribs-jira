@@ -22,7 +22,7 @@ chardet==4.0.0
     # via requests
 coverage==5.5
     # via pytest-cov
-cryptography==3.4.7
+cryptography==3.4.8
     # via requests-kerberos
 decorator==5.0.9
     # via
@@ -47,7 +47,7 @@ idna==2.10
     # via requests
 imagesize==1.2.0
     # via sphinx
-importlib-metadata==4.6.1
+importlib-metadata==4.8.1
     # via
     #   keyring
     #   pluggy
@@ -62,7 +62,7 @@ jedi==0.18.0
     # via ipython
 jinja2==3.0.1
     # via sphinx
-keyring==23.0.1
+keyring==23.2.1
     # via jira (setup.cfg)
 markupsafe==2.0.1
     # via
@@ -85,7 +85,7 @@ pickleshare==0.7.5
     # via ipython
 pluggy==0.13.1
     # via pytest
-prompt-toolkit==3.0.19
+prompt-toolkit==3.0.20
     # via ipython
 ptyprocess==0.7.0
     # via pexpect
@@ -96,7 +96,7 @@ py==1.10.0
     #   pytest-forked
 pycparser==2.20
     # via cffi
-pygments==2.9.0
+pygments==2.10.0
     # via
     #   ipython
     #   sphinx
@@ -108,7 +108,7 @@ pykerberos==1.2.1
     # via requests-kerberos
 pyparsing==2.4.7
     # via packaging
-pytest==6.2.4
+pytest==6.2.5
     # via
     #   jira (setup.cfg)
     #   pytest-cache
@@ -196,7 +196,7 @@ toml==0.10.2
     #   pytest-cov
 traitlets==4.3.3
     # via ipython
-typing-extensions==3.10.0.0
+typing-extensions==3.10.0.2
     # via importlib-metadata
 urllib3==1.26.6
     # via requests
