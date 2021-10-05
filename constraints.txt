@@ -20,9 +20,9 @@ cffi==1.14.6
     # via cryptography
 chardet==4.0.0
     # via requests
-coverage==5.5
+coverage==6.0
     # via pytest-cov
-cryptography==3.4.8
+cryptography==35.0.0
     # via requests-kerberos
 decorator==5.1.0
     # via
@@ -132,7 +132,7 @@ pytest-timeout==1.4.2
     # via jira (setup.cfg)
 pytest-xdist==2.4.0
     # via jira (setup.cfg)
-pytz==2021.1
+pytz==2021.3
     # via babel
 pyyaml==5.4.1
     # via jira (setup.cfg)
@@ -208,7 +208,7 @@ xmlrunner==1.7.7
     # via jira (setup.cfg)
 yanc==0.3.3
     # via jira (setup.cfg)
-zipp==3.5.0
+zipp==3.6.0
     # via importlib-metadata
 
 # The following packages are considered to be unsafe in a requirements file:
