@@ -264,6 +264,19 @@ class JiraCookieAuth(AuthBase):
         self._get_session(self.__auth)
 
 
+class TokenAuth(AuthBase):
+    """Bearer Token Authentication"""
+
+    def __init__(self, token: str):
+        # setup any auth-related data here
+        self._token = token
+
+    def __call__(self, r: requests.PreparedRequest):
+        # modify and return the request
+        r.headers["authorization"] = f"Bearer {self._token}"
+        return r
+
+
 class JIRA:
     """User interface to Jira.
 
@@ -293,7 +306,7 @@ class JIRA:
         "context_path": "/",
         "rest_path": "api",
         "rest_api_version": "2",
-        "agile_rest_path": GreenHopperResource.GREENHOPPER_REST_PATH,
+        "agile_rest_path": GreenHopperResource.AGILE_BASE_REST_PATH,
         "agile_rest_api_version": "1.0",
         "verify": True,
         "resilient": True,
@@ -325,7 +338,8 @@ class JIRA:
         self,
         server: str = None,
         options: Dict[str, Union[str, bool, Any]] = None,
-        basic_auth: Union[None, Tuple[str, str]] = None,
+        basic_auth: Optional[Tuple[str, str]] = None,
+        token_auth: Optional[str] = None,
         oauth: Dict[str, Any] = None,
         jwt: Dict[str, Any] = None,
         kerberos=False,
@@ -347,8 +361,8 @@ class JIRA:
         or ``atlas-run-standalone`` commands. By default, this instance runs at
         ``http://localhost:2990/jira``. The ``options`` argument can be used to set the Jira instance to use.
 
-        Authentication is handled with the ``basic_auth`` argument. If authentication is supplied (and is
-        accepted by Jira), the client will remember it for subsequent requests.
+        Authentication is handled with the ``basic_auth``  or ``token_auth`` argument.
+        If authentication is supplied (and is accepted by Jira), the client will remember it for subsequent requests.
 
         For quick command line access to a server, see the ``jirashell`` script included with this distribution.
 
@@ -369,8 +383,11 @@ class JIRA:
                 * check_update -- Check whether using the newest python-jira library version.
                 * headers -- a dict to update the default headers the session uses for all API requests.
 
-            basic_auth (Union[None, Tuple[str, str]]): A tuple of username and password to use when
+            basic_auth (Optional[Tuple[str, str]]): A tuple of username and password to use when
               establishing a session via HTTP BASIC authentication.
+
+            token_auth (Optional[str]): A string containing the token necessary for (PAT) bearer token authorization.
+
             oauth (Optional[Any]): A dict of properties for OAuth authentication. The following properties are required:
 
                 * access_token -- OAuth access token for the user
@@ -466,6 +483,8 @@ class JIRA:
             self._session.headers.update(self._options["headers"])
         elif jwt:
             self._create_jwt_session(jwt, timeout)
+        elif token_auth:
+            self._create_token_session(token_auth, timeout)
         elif kerberos:
             self._create_kerberos_session(timeout, kerberos_options=kerberos_options)
         elif auth:
@@ -476,6 +495,9 @@ class JIRA:
             verify = bool(self._options["verify"])
             self._session = ResilientSession(timeout=timeout)
             self._session.verify = verify
+
+        # Add the client authentication certificate to the request if configured
+        self._add_client_cert_to_session()
 
         self._session.headers.update(self._options["headers"])
 
@@ -539,8 +561,6 @@ class JIRA:
         self._session = ResilientSession(timeout=timeout)
         self._session.auth = JiraCookieAuth(self._session, self.session, auth)
         self._session.verify = bool(self._options["verify"])
-        client_cert: Tuple[str, str] = self._options["client_cert"]  # to help mypy
-        self._session.cert = client_cert
 
     def _check_update_(self):
         """Check if the current version of the library is outdated."""
@@ -1652,8 +1672,10 @@ class JIRA:
         """
         return user.accountId if self._is_cloud else user.name
 
-    def _get_user_id(self, user: str) -> str:
+    def _get_user_id(self, user: Optional[str]) -> Optional[str]:
         """Internal method for translating an user search (str) to an id.
+
+        Return None and -1 unchanged.
 
         This function uses :py:meth:`JIRA.search_users` to find the user
         and then using :py:meth:`JIRA._get_user_identifier` extracts
@@ -1662,14 +1684,17 @@ class JIRA:
 
 
         Args:
-            user (str): The search term used for finding a user.
+            user (Optional[str]): The search term used for finding a user.
+              None, '-1' and -1 are equivalent to 'Unassigned'.
 
         Raises:
             JIRAError: If any error occurs.
 
         Returns:
-            str: The Jira user's identifier.
+            Optional[str]: The Jira user's identifier. Or "-1" and None unchanged.
         """
+        if user in (None, -1, "-1"):
+            return user
         try:
             user_obj: User
             if self._is_cloud:
@@ -1682,12 +1707,13 @@ class JIRA:
 
     # non-resource
     @translate_resource_args
-    def assign_issue(self, issue: Union[int, str], assignee: str) -> bool:
-        """Assign an issue to a user. None will set it to unassigned. -1 will set it to Automatic.
+    def assign_issue(self, issue: Union[int, str], assignee: Optional[str]) -> bool:
+        """Assign an issue to a user.
 
         Args:
             issue (Union[int,str]): the issue ID or key to assign
-            assignee (str): the user to assign the issue to
+            assignee (str): the user to assign the issue to.
+              None will set it to unassigned. -1 will set it to Automatic.
 
         Returns:
             bool
@@ -2890,7 +2916,11 @@ class JIRA:
         Returns:
             User
         """
-        user = User(self._options, self._session)
+        user = User(
+            self._options,
+            self._session,
+            _query_param="accountId" if self._is_cloud else "username",
+        )
         params = {}
         if expand is not None:
             params["expand"] = expand
@@ -3145,7 +3175,7 @@ class JIRA:
         Returns:
             ResultList
         """
-        params = {"username": user}
+        params = {"query" if self._is_cloud else "username": user}
         if issueKey is not None:
             params["issueKey"] = issueKey
         if projectKey is not None:
@@ -3319,8 +3349,6 @@ class JIRA:
         self._session = ResilientSession(timeout=timeout)
         self._session.verify = verify
         self._session.auth = (username, password)
-        client_cert: Tuple[str, str] = self._options["client_cert"]  # to help mypy
-        self._session.cert = client_cert
 
     def _create_oauth_session(
         self, oauth, timeout: Optional[Union[Union[float, int], Tuple[float, float]]]
@@ -3368,6 +3396,13 @@ class JIRA:
             mutual_authentication=mutual_authentication
         )
 
+    def _add_client_cert_to_session(self):
+        """
+        Adds the client certificate to the request if configured through the constructor.
+        """
+        client_cert: Tuple[str, str] = self._options["client_cert"]  # to help mypy
+        self._session.cert = client_cert
+
     @staticmethod
     def _timestamp(dt: datetime.timedelta = None):
         t = datetime.datetime.utcnow()
@@ -3395,6 +3430,20 @@ class JIRA:
         self._session = ResilientSession(timeout=timeout)
         self._session.verify = bool(self._options["verify"])
         self._session.auth = jwt_auth
+
+    def _create_token_session(
+        self,
+        token_auth: str,
+        timeout: Optional[Union[Union[float, int], Tuple[float, float]]],
+    ):
+        """
+        Creates token-based session.
+        Header structure: "authorization": "Bearer <token_auth>"
+        """
+        verify = self._options["verify"]
+        self._session = ResilientSession(timeout=timeout)
+        self._session.verify = verify
+        self._session.auth = TokenAuth(token_auth)
 
     def _set_avatar(self, params, url, avatar):
         data = {"id": avatar}
@@ -3778,9 +3827,13 @@ class JIRA:
             self.log.error(ioe)
         return None
 
-    def current_user(self, field: str = "key") -> str:
+    def current_user(self, field: Optional[str] = None) -> str:
         """Returns the username or emailAddress of the current user. For anonymous
         users it will return a value that evaluates as False.
+
+        Args:
+            field (Optional[str]): the name of the identifier field.
+              Defaults to "accountId" for Jira Cloud, else "key"
 
         Returns:
             str
@@ -3792,6 +3845,9 @@ class JIRA:
 
             r_json: Dict[str, str] = json_loads(r)
             self._myself = r_json
+
+        if field is None:
+            field = "accountId" if self._is_cloud else "key"
 
         return self._myself[field]
 
@@ -3992,31 +4048,31 @@ class JIRA:
 
         ps_list: List[Dict[str, Any]]
 
-        if not permissionScheme:
+        if permissionScheme is None:
             ps_list = self.permissionschemes()
             for sec in ps_list:
                 if sec["name"] == "Default Permission Scheme":
                     permissionScheme = sec["id"]
-                break
-            if not permissionScheme:
+                    break
+            if permissionScheme is None and ps_list:
                 permissionScheme = ps_list[0]["id"]
 
-        if not issueSecurityScheme:
+        if issueSecurityScheme is None:
             ps_list = self.issuesecurityschemes()
             for sec in ps_list:
                 if sec["name"] == "Default":  # no idea which one is default
                     issueSecurityScheme = sec["id"]
-                break
-            if not issueSecurityScheme and ps_list:
+                    break
+            if issueSecurityScheme is None and ps_list:
                 issueSecurityScheme = ps_list[0]["id"]
 
-        if not projectCategory:
+        if projectCategory is None:
             ps_list = self.projectcategories()
             for sec in ps_list:
                 if sec["name"] == "Default":  # no idea which one is default
                     projectCategory = sec["id"]
-                break
-            if not projectCategory and ps_list:
+                    break
+            if projectCategory is None and ps_list:
                 projectCategory = ps_list[0]["id"]
         # <beep> Atlassian for failing to provide an API to get projectTemplateKey values
         #  Possible values are just hardcoded and obviously depending on Jira version.
@@ -4026,7 +4082,9 @@ class JIRA:
         if not template_name:
             # https://confluence.atlassian.com/jirakb/creating-projects-via-rest-api-in-jira-963651978.html
             template_key = (
-                "com.pyxis.greenhopper.jira:basic-software-development-template"
+                "com.pyxis.greenhopper.jira:gh-simplified-basic"
+                if self._is_cloud
+                else "com.pyxis.greenhopper.jira:basic-software-development-template"
             )
 
         # https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-projects/#api-rest-api-2-project-get
@@ -4089,8 +4147,7 @@ class JIRA:
             "key": key,
             "projectTypeKey": ptype,
             "projectTemplateKey": template_key,
-            "lead": assignee,
-            # "leadAccountId": assignee,
+            "leadAccountId" if self._is_cloud else "lead": assignee,
             "assigneeType": "PROJECT_LEAD",
             "description": "",
             # "avatarId": 13946,
@@ -4669,14 +4726,36 @@ class JIRA:
         url = self._get_url(f"epics/{epic_id}/add", base=self.AGILE_BASE_URL)
         return self._session.put(url, data=json.dumps(data))
 
-    # TODO(ssbarnea): Both GreenHopper and new Jira Agile API support moving more than one issue.
-    def rank(self, issue: str, next_issue: str) -> Response:
-        """Rank an issue before another using the default Ranking field, the one named 'Rank'.
+    # TODO(ssbarnea): Jira Agile API supports moving more than one issue.
+    def rank(
+        self,
+        issue: str,
+        next_issue: Optional[str] = None,
+        prev_issue: Optional[str] = None,
+    ) -> Response:
+        """Rank an issue before/after another using the default Ranking field, the one named 'Rank'.
+
+        Pass only ONE of `next_issue` or `prev_issue`.
 
         Args:
-            issue (str): issue key of the issue to be ranked before the second one.
-            next_issue (str): issue key of the second issue.
+            issue (str): issue key of the issue to be ranked before/after the second one.
+            next_issue (str): issue key that the first issue is to be ranked before.
+            prev_issue (str): issue key that the first issue is to be ranked after.
         """
+
+        if next_issue is None and prev_issue is None:
+            raise ValueError("One of 'next_issue' or 'prev_issue' must be specified")
+        elif next_issue is not None and prev_issue is not None:
+            raise ValueError(
+                "Only one of 'next_issue' or 'prev_issue' may be specified"
+            )
+        if next_issue is not None:
+            before_or_after = "Before"
+            other_issue = next_issue
+        elif prev_issue is not None:
+            before_or_after = "After"
+            other_issue = prev_issue
+
         if not self._rank:
             for field in self.fields():
                 if field["name"] == "Rank":
@@ -4693,38 +4772,21 @@ class JIRA:
                         # Obsolete since Jira v6.3.13.1
                         self._rank = field["schema"]["customId"]
 
-        if self._options["agile_rest_path"] == GreenHopperResource.AGILE_BASE_REST_PATH:
-            url = self._get_url("issue/rank", base=self.AGILE_BASE_URL)
-            payload = {
-                "issues": [issue],
-                "rankBeforeIssue": next_issue,
-                "rankCustomFieldId": self._rank,
-            }
-            try:
-                return self._session.put(url, data=json.dumps(payload))
-            except JIRAError as e:
-                if e.status_code == 404:
-                    warnings.warn(
-                        "Status code 404 may mean, that too old Jira Agile version is installed."
-                        " At least version 6.7.10 is required."
-                    )
-                raise
-        elif (
-            self._options["agile_rest_path"]
-            == GreenHopperResource.GREENHOPPER_REST_PATH
-        ):
-            data = {
-                "issueKeys": [issue],
-                "rankBeforeKey": next_issue,
-                "customFieldId": self._rank,
-            }
-            url = self._get_url("rank", base=self.AGILE_BASE_URL)
-            return self._session.put(url, data=json.dumps(data))
-        else:
-            raise NotImplementedError(
-                'No API for ranking issues for agile_rest_path="%s"'
-                % self._options["agile_rest_path"]
-            )
+        url = self._get_url("issue/rank", base=self.AGILE_BASE_URL)
+        payload = {
+            "issues": [issue],
+            f"rank{before_or_after}Issue": other_issue,
+            "rankCustomFieldId": self._rank,
+        }
+        try:
+            return self._session.put(url, data=json.dumps(payload))
+        except JIRAError as e:
+            if e.status_code == 404:
+                warnings.warn(
+                    "Status code 404 may mean, that too old Jira Agile version is installed."
+                    " At least version 6.7.10 is required."
+                )
+            raise
 
     def move_to_backlog(self, issue_keys: str) -> Response:
         """Move issues in ``issue_keys`` to the backlog, removing them from all sprints that have not been completed.

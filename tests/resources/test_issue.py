@@ -387,6 +387,28 @@ class IssueTests(JiraTestCase):
     def test_assign_to_bad_issue_raises(self):
         self.assertRaises(JIRAError, self.jira.assign_issue, "NOPE-1", "notauser")
 
+    def test_unassign_issue(self):
+        # Given: A user is assigned to an issue
+        self.assertTrue(self.jira.assign_issue(self.issue_1, self.user_normal.name))
+        self.assertEqual(
+            self.jira.issue(self.issue_1).fields.assignee.name, self.user_normal.name
+        )
+        # When: we unassign the issue
+        self.assertTrue(self.jira.assign_issue(self.issue_1, None))
+        # Then: the issue has an assignee of None
+        self.assertEqual(self.jira.issue(self.issue_1).fields.assignee, None)
+
+    def test_assign_issue_automatic(self):
+        # Given: A user is assigned to an issue
+        self.assertTrue(self.jira.assign_issue(self.issue_1, self.user_normal.name))
+        self.assertEqual(
+            self.jira.issue(self.issue_1).fields.assignee.name, self.user_normal.name
+        )
+        # When: we assign the issue to "-1"
+        self.assertTrue(self.jira.assign_issue(self.issue_1, "-1"))
+        # Then: the issue has the default assignee (the admin user)
+        self.assertEqual(self.jira.issue(self.issue_1).fields.assignee, self.user_admin)
+
     def test_editmeta(self):
         expected_fields = {
             "assignee",
@@ -445,6 +467,25 @@ class IssueTests(JiraTestCase):
         # issue = self.jira.issue(issue.key)
         # self.assertEqual(issue.fields.assignee.name, self.test_manager.CI_JIRA_USER)
         # self.assertEqual(issue.fields.status.id, transition_id)
+
+    def test_rank(self):
+        def get_issues_ordered_by_rank():
+            """Search for the issues, returned in the order determined by their rank."""
+            return self.jira.search_issues(
+                f"key in ({self.issue_1},{self.issue_2}) ORDER BY Rank ASC"
+            )
+
+        self.jira.rank(self.issue_1, next_issue=self.issue_2)
+        issues = get_issues_ordered_by_rank()
+        assert (issues[0].key, issues[1].key) == (self.issue_1, self.issue_2)
+
+        self.jira.rank(self.issue_2, next_issue=self.issue_1)
+        issues = get_issues_ordered_by_rank()
+        assert (issues[0].key, issues[1].key) == (self.issue_2, self.issue_1)
+
+        self.jira.rank(self.issue_2, prev_issue=self.issue_1)
+        issues = get_issues_ordered_by_rank()
+        assert (issues[0].key, issues[1].key) == (self.issue_1, self.issue_2)
 
     @broken_test(
         reason="Greenhopper API doesn't work on standalone docker image with JIRA Server 8.9.0"
