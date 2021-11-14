@@ -202,7 +202,7 @@ toml==0.10.2
     # via pytest
 tomli==1.2.2
     # via coverage
-traitlets==4.3.3
+traitlets==5.1.1
     # via ipython
 typing-extensions==3.10.0.2
     # via importlib-metadata
