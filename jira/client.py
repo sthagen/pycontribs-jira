@@ -210,58 +210,75 @@ class JiraCookieAuth(AuthBase):
     """Jira Cookie Authentication
 
     Allows using cookie authentication as described by
-    https://developer.atlassian.com/jiradev/jira-apis/jira-rest-apis/jira-rest-api-tutorials/jira-rest-api-example-cookie-based-authentication
-
+    https://developer.atlassian.com/server/jira/platform/cookie-based-authentication/
     """
 
     def __init__(
-        self, session: ResilientSession, _get_session: Callable, auth: Tuple[str, str]
+        self, session: ResilientSession, session_api_url: str, auth: Tuple[str, str]
     ):
         """Cookie Based Authentication
 
         Args:
             session (ResilientSession): The Session object to communicate with the API.
-            _get_session (Callable): The function that returns a :py_class:``User``
-            auth (Tuple[str, str]): The username, password tuple
+            session_api_url (str): The session api url to use.
+            auth (Tuple[str, str]): The username, password tuple.
         """
-        self._session = session
-        self._get_session = _get_session
-        self.__auth = auth
 
-    def handle_401(self, response, **kwargs):
-        if response.status_code != 401:
-            return response
-        self.init_session()
-        response = self.process_original_request(response.request.copy())
+        self._session = session
+        self._session_api_url = session_api_url  # e.g ."/rest/auth/1/session"
+        self.__auth = auth
+        self._retry_counter_401 = 0
+        self._max_allowed_401_retries = 1  # 401 aren't recoverable with retries really
+
+    @property
+    def cookies(self):
+        return self._session.cookies
+
+    def _increment_401_retry_counter(self):
+        self._retry_counter_401 += 1
+
+    def _reset_401_retry_counter(self):
+        self._retry_counter_401 = 0
+
+    def __call__(self, request: requests.PreparedRequest):
+        request.register_hook("response", self.handle_401)
+        return request
+
+    def init_session(self):
+        """Initialise the Session object's cookies, so we can use the session cookie."""
+        username, password = self.__auth
+        authentication_data = {"username": username, "password": password}
+        r = self._session.post(  # this also goes through the handle_401() hook
+            self._session_api_url, data=json.dumps(authentication_data)
+        )
+        r.raise_for_status()
+
+    def handle_401(self, response: requests.Response, **kwargs):
+        """Refresh cookies if the session cookie has expired. Then retry the request."""
+        if (
+            response.status_code == 401
+            and self._retry_counter_401 < self._max_allowed_401_retries
+        ):
+            LOG.info("Trying to refresh the cookie auth session...")
+            self._increment_401_retry_counter()
+            self.init_session()
+            response = self.process_original_request(response.request.copy())
+        self._reset_401_retry_counter()
         return response
 
-    def process_original_request(self, original_request):
+    def process_original_request(self, original_request: requests.PreparedRequest):
         self.update_cookies(original_request)
         return self.send_request(original_request)
 
-    def update_cookies(self, original_request):
+    def update_cookies(self, original_request: requests.PreparedRequest):
         # Cookie header needs first to be deleted for the header to be updated using
         # the prepare_cookies method. See request.PrepareRequest.prepare_cookies
         if "Cookie" in original_request.headers:
             del original_request.headers["Cookie"]
         original_request.prepare_cookies(self.cookies)
 
-    def init_session(self):
-        self.start_session()
-
-    def __call__(self, request):
-        request.register_hook("response", self.handle_401)
-        return request
-
-    def send_request(self, request):
+    def send_request(self, request: requests.PreparedRequest):
         return self._session.send(request)
-
-    @property
-    def cookies(self):
-        return self._session.cookies
-
-    def start_session(self):
-        self._get_session(self.__auth)
 
 
 class TokenAuth(AuthBase):
@@ -378,8 +395,11 @@ class JIRA:
                 * rest_api_version -- the version of the REST resources under rest_path to use. Defaults to ``2``.
                 * agile_rest_path - the REST path to use for Jira Agile requests. Defaults to ``greenhopper`` (old, private
                   API). Check :py:class:`jira.resources.GreenHopperResource` for other supported values.
-                * verify -- Verify SSL certs. Defaults to ``True``.
-                * client_cert -- a tuple of (cert,key) for the requests library for client side SSL
+                * verify (Union[bool, str]) -- Verify SSL certs. Defaults to ``True``.
+                  Or path to to a CA_BUNDLE file or directory with certificates of trusted CAs,
+                  for the `requests` library to use.
+                * client_cert (Union[str, Tuple[str,str]]) -- Path to file with both cert and key or
+                  a tuple of (cert,key), for the `requests` library to use for client side SSL.
                 * check_update -- Check whether using the newest python-jira library version.
                 * headers -- a dict to update the default headers the session uses for all API requests.
 
@@ -480,7 +500,6 @@ class JIRA:
             self._create_oauth_session(oauth, timeout)
         elif basic_auth:
             self._create_http_basic_session(*basic_auth, timeout=timeout)
-            self._session.headers.update(self._options["headers"])
         elif jwt:
             self._create_jwt_session(jwt, timeout)
         elif token_auth:
@@ -492,12 +511,12 @@ class JIRA:
             # always log in for cookie based auth, as we need a first request to be logged in
             validate = True
         else:
-            verify = bool(self._options["verify"])
             self._session = ResilientSession(timeout=timeout)
-            self._session.verify = verify
 
         # Add the client authentication certificate to the request if configured
         self._add_client_cert_to_session()
+        # Add the SSL Cert to the request if configured
+        self._add_ssl_cert_verif_strategy_to_session()
 
         self._session.headers.update(self._options["headers"])
 
@@ -537,11 +556,22 @@ class JIRA:
             self._check_update_()
             JIRA.checked_version = True
 
-        self._fields = {}
+        self._fields_cache_value: Dict[str, str] = {}  # access via self._fields_cache
+
+    @property
+    def _fields_cache(self) -> Dict[str, str]:
+        """Cached dictionary of {Field Name: Field ID}. Lazy loaded."""
+        if not self._fields_cache_value:
+            self._update_fields_cache()
+        return self._fields_cache_value
+
+    def _update_fields_cache(self):
+        """Update the cache used for `self._fields_cache`."""
+        self._fields_cache_value = {}
         for f in self.fields():
             if "clauseNames" in f:
                 for name in f["clauseNames"]:
-                    self._fields[name] = f["id"]
+                    self._fields_cache_value[name] = f["id"]
 
     @property
     def server_url(self) -> str:
@@ -558,9 +588,17 @@ class JIRA:
         auth: Tuple[str, str],
         timeout: Optional[Union[Union[float, int], Tuple[float, float]]],
     ):
+        warnings.warn(
+            "Use OAuth or Token based authentication "
+            + "instead of Cookie based Authentication.",
+            DeprecationWarning,
+        )
         self._session = ResilientSession(timeout=timeout)
-        self._session.auth = JiraCookieAuth(self._session, self.session, auth)
-        self._session.verify = bool(self._options["verify"])
+        self._session.auth = JiraCookieAuth(
+            session=self._session,
+            session_api_url="{server}{auth_url}".format(**self._options),
+            auth=auth,
+        )
 
     def _check_update_(self):
         """Check if the current version of the library is outdated."""
@@ -2035,10 +2073,13 @@ class JIRA:
                 raise JIRAError(f"Invalid transition name. {transition}")
 
         data: Dict[str, Any] = {"transition": {"id": transitionId}}
+        update_dict: Dict[str, Any] = {}
         if comment:
-            data["update"] = {"comment": [{"add": {"body": comment}}]}
+            update_dict["comment"] = [{"add": {"body": comment}}]
         if worklog:
-            data["update"] = {"worklog": [{"add": {"timeSpent": worklog}}]}
+            update_dict["worklog"] = [{"add": {"timeSpent": worklog}}]
+        if comment or worklog:
+            data["update"] = update_dict
         if fields is not None:
             data["fields"] = fields
         else:
@@ -2780,11 +2821,11 @@ class JIRA:
         # this will translate JQL field names to REST API Name
         # most people do know the JQL names so this will help them use the API easier
         untranslate = {}  # use to add friendly aliases when we get the results back
-        if self._fields:
+        if self._fields_cache:
             for i, field in enumerate(fields):
-                if field in self._fields:
-                    untranslate[self._fields[field]] = fields[i]
-                    fields[i] = self._fields[field]
+                if field in self._fields_cache:
+                    untranslate[self._fields_cache[field]] = fields[i]
+                    fields[i] = self._fields_cache[field]
 
         search_params = {
             "jql": jql_str,
@@ -3345,15 +3386,12 @@ class JIRA:
         Returns:
             ResilientSession
         """
-        verify = bool(self._options["verify"])
         self._session = ResilientSession(timeout=timeout)
-        self._session.verify = verify
         self._session.auth = (username, password)
 
     def _create_oauth_session(
         self, oauth, timeout: Optional[Union[Union[float, int], Tuple[float, float]]]
     ):
-        verify = bool(self._options["verify"])
 
         from oauthlib.oauth1 import SIGNATURE_RSA
         from requests_oauthlib import OAuth1
@@ -3366,7 +3404,6 @@ class JIRA:
             resource_owner_secret=oauth["access_token_secret"],
         )
         self._session = ResilientSession(timeout)
-        self._session.verify = verify
         self._session.auth = oauth_instance
 
     def _create_kerberos_session(
@@ -3374,7 +3411,6 @@ class JIRA:
         timeout: Optional[Union[Union[float, int], Tuple[float, float]]],
         kerberos_options=None,
     ):
-        verify = bool(self._options["verify"])
         if kerberos_options is None:
             kerberos_options = {}
 
@@ -3391,17 +3427,31 @@ class JIRA:
             )
 
         self._session = ResilientSession(timeout=timeout)
-        self._session.verify = verify
         self._session.auth = HTTPKerberosAuth(
             mutual_authentication=mutual_authentication
         )
 
     def _add_client_cert_to_session(self):
+        """Adds the client certificate to the session.
+        If configured through the constructor.
+
+        https://docs.python-requests.org/en/master/user/advanced/#client-side-certificates
+        - str: a single file (containing the private key and the certificate)
+        - Tuple[str,str] a tuple of both files’ paths
         """
-        Adds the client certificate to the request if configured through the constructor.
-        """
-        client_cert: Tuple[str, str] = self._options["client_cert"]  # to help mypy
+        client_cert: Union[str, Tuple[str, str]] = self._options["client_cert"]
         self._session.cert = client_cert
+
+    def _add_ssl_cert_verif_strategy_to_session(self):
+        """Adds verification strategy for host SSL certificates.
+        If configured through the constructor.
+
+        https://docs.python-requests.org/en/master/user/advanced/#ssl-cert-verification
+        - str: Path to a `CA_BUNDLE` file or directory with certificates of trusted CAs.
+        - bool: True/False
+        """
+        ssl_cert: Union[bool, str] = self._options["verify"]
+        self._session.verify = ssl_cert
 
     @staticmethod
     def _timestamp(dt: datetime.timedelta = None):
@@ -3428,7 +3478,6 @@ class JIRA:
         for f in jwt["payload"].items():
             jwt_auth.add_field(f[0], f[1])
         self._session = ResilientSession(timeout=timeout)
-        self._session.verify = bool(self._options["verify"])
         self._session.auth = jwt_auth
 
     def _create_token_session(
@@ -3440,9 +3489,7 @@ class JIRA:
         Creates token-based session.
         Header structure: "authorization": "Bearer <token_auth>"
         """
-        verify = self._options["verify"]
         self._session = ResilientSession(timeout=timeout)
-        self._session.verify = verify
         self._session.auth = TokenAuth(token_auth)
 
     def _set_avatar(self, params, url, avatar):
@@ -3828,15 +3875,15 @@ class JIRA:
         return None
 
     def current_user(self, field: Optional[str] = None) -> str:
-        """Returns the username or emailAddress of the current user. For anonymous
-        users it will return a value that evaluates as False.
+        """Return the `accountId` (Cloud) else `username` of the current user.
+        For anonymous users it will return a value that evaluates as False.
 
         Args:
             field (Optional[str]): the name of the identifier field.
-              Defaults to "accountId" for Jira Cloud, else "key"
+              Defaults to "accountId" for Jira Cloud, else "username"
 
         Returns:
-            str
+            str: User's `accountId` (Cloud) else `username`.
         """
         if not hasattr(self, "_myself"):
 
@@ -3847,7 +3894,9 @@ class JIRA:
             self._myself = r_json
 
         if field is None:
-            field = "accountId" if self._is_cloud else "key"
+            # Note: For Self-Hosted 'displayName' can be changed,
+            # but 'name' and 'key' cannot, so should be identifying properties.
+            field = "accountId" if self._is_cloud else "name"
 
         return self._myself[field]
 
