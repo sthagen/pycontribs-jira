@@ -1,4 +1,3 @@
-#!/usr/bin/python
 """
 This module implements a friendly (well, friendlier) interface between the raw JSON
 responses from Jira and the Resource/dict abstractions provided by this library. Users
@@ -28,7 +27,9 @@ from typing import (
     Callable,
     Dict,
     Generic,
+    Iterator,
     List,
+    Literal,
     Optional,
     Tuple,
     Type,
@@ -36,24 +37,22 @@ from typing import (
     Union,
     cast,
     no_type_check,
+    overload,
 )
 from urllib.parse import parse_qs, quote, urlparse
 
 import requests
-from pkg_resources import parse_version
+from packaging.version import parse as parse_version
 from requests import Response
 from requests.auth import AuthBase
 from requests.structures import CaseInsensitiveDict
 from requests.utils import get_netrc_auth
 
 from jira import __version__
-
-# GreenHopper specific resources
 from jira.exceptions import JIRAError
 from jira.resilientsession import ResilientSession, raise_on_error
-
-# Jira-specific resources
 from jira.resources import (
+    AgileResource,
     Attachment,
     Board,
     Comment,
@@ -62,14 +61,17 @@ from jira.resources import (
     CustomFieldOption,
     Dashboard,
     Filter,
-    GreenHopperResource,
     Group,
     Issue,
     IssueLink,
     IssueLinkType,
+    IssueSecurityLevelScheme,
     IssueType,
+    IssueTypeScheme,
+    NotificationScheme,
     PermissionScheme,
     Priority,
+    PriorityScheme,
     Project,
     RemoteLink,
     RequestType,
@@ -85,6 +87,7 @@ from jira.resources import (
     Version,
     Votes,
     Watchers,
+    WorkflowScheme,
     Worklog,
 )
 from jira.utils import json_loads, threaded_requests
@@ -100,6 +103,10 @@ try:
 except ImportError:
     pass
 
+try:
+    from typing import SupportsIndex  # type:ignore[attr-defined] # Py38+
+except ImportError:
+    from typing_extensions import SupportsIndex
 
 LOG = _logging.getLogger("jira")
 LOG.addHandler(_logging.NullHandler())
@@ -162,15 +169,31 @@ class ResultList(list, Generic[ResourceType]):
         self.isLast = _isLast
         self.total = _total if _total is not None else len(self)
 
-        self.iterable: List = list(iterable) if iterable else []
+        self.iterable: List[ResourceType] = list(iterable) if iterable else []
         self.current = self.startAt
 
-    def __next__(self) -> Type[ResourceType]:
+    def __next__(self) -> ResourceType:  # type:ignore[misc]
         self.current += 1
         if self.current > self.total:
             raise StopIteration
         else:
             return self.iterable[self.current - 1]
+
+    def __iter__(self) -> Iterator[ResourceType]:
+        return super().__iter__()
+
+    # fmt: off
+    # The mypy error we ignore is about returning a contravariant type.
+    # As this class is a List of a generic 'Resource' class
+    # this is the right way to specify that the output is the same as which
+    # the class was initialized with.
+    @overload
+    def __getitem__(self, i: SupportsIndex) -> ResourceType: ...  # type:ignore[misc]  # noqa: E704
+    @overload
+    def __getitem__(self, s: slice) -> List[ResourceType]: ...  # type:ignore[misc]  # noqa: E704
+    def __getitem__(self, slice_or_index): # noqa: E301,E261
+        return list.__getitem__(self, slice_or_index)
+    # fmt: on
 
 
 class QshGenerator:
@@ -323,7 +346,7 @@ class JIRA:
         "context_path": "/",
         "rest_path": "api",
         "rest_api_version": "2",
-        "agile_rest_path": GreenHopperResource.AGILE_BASE_REST_PATH,
+        "agile_rest_path": AgileResource.AGILE_BASE_REST_PATH,
         "agile_rest_api_version": "1.0",
         "verify": True,
         "resilient": True,
@@ -349,7 +372,7 @@ class JIRA:
 
     # TODO(ssbarnea): remove these two variables and use the ones defined in resources
     JIRA_BASE_URL = Resource.JIRA_BASE_URL
-    AGILE_BASE_URL = GreenHopperResource.AGILE_BASE_URL
+    AGILE_BASE_URL = AgileResource.AGILE_BASE_URL
 
     def __init__(
         self,
@@ -393,8 +416,7 @@ class JIRA:
                 * server -- the server address and context path to use. Defaults to ``http://localhost:2990/jira``.
                 * rest_path -- the root REST path to use. Defaults to ``api``, where the Jira REST resources live.
                 * rest_api_version -- the version of the REST resources under rest_path to use. Defaults to ``2``.
-                * agile_rest_path - the REST path to use for Jira Agile requests. Defaults to ``greenhopper`` (old, private
-                  API). Check :py:class:`jira.resources.GreenHopperResource` for other supported values.
+                * agile_rest_path - the REST path to use for Jira Agile requests. Defaults to ``agile``.
                 * verify (Union[bool, str]) -- Verify SSL certs. Defaults to ``True``.
                   Or path to to a CA_BUNDLE file or directory with certificates of trusted CAs,
                   for the `requests` library to use.
@@ -449,7 +471,7 @@ class JIRA:
         """
         # force a copy of the tuple to be used in __del__() because
         # sys.version_info could have already been deleted in __del__()
-        self.sys_version_info = tuple(i for i in sys.version_info)
+        self.sys_version_info = tuple(sys.version_info)
 
         if options is None:
             options = {}
@@ -537,7 +559,7 @@ class JIRA:
                 auth_method = (
                     oauth or basic_auth or jwt or kerberos or auth or "anonymous"
                 )
-                raise JIRAError(f"Can not log in with {str(auth_method)}")
+                raise JIRAError(f"Can not log in with {auth_method}")
 
         self.deploymentType = None
         if get_server_info:
@@ -641,7 +663,6 @@ class JIRA:
         if "<!-- SecurityTokenMissing -->" in content:
             self.log.warning("Got SecurityTokenMissing")
             raise JIRAError(f"SecurityTokenMissing: {content}")
-            return False
         return True
 
     def _get_sprint_field_id(self):
@@ -1175,7 +1196,7 @@ class JIRA:
         description: str = None,
         jql: str = None,
         favourite: bool = None,
-    ):
+    ) -> Filter:
         """Create a new filter and return a filter Resource for it.
 
         Args:
@@ -1435,13 +1456,13 @@ class JIRA:
 
         p = data["fields"]["project"]
 
-        if isinstance(p, str) or isinstance(p, int):
+        if isinstance(p, (str, int)):
             data["fields"]["project"] = {"id": self.project(str(p)).id}
 
         p = data["fields"]["issuetype"]
         if isinstance(p, int):
             data["fields"]["issuetype"] = {"id": p}
-        if isinstance(p, str) or isinstance(p, int):
+        if isinstance(p, (str, int)):
             data["fields"]["issuetype"] = {"id": self.issue_type_by_name(str(p)).id}
 
         url = self._get_url("issue")
@@ -1478,7 +1499,7 @@ class JIRA:
             issue_data: Dict[str, Any] = _field_worker(field_dict)
             p = issue_data["fields"]["project"]
 
-            if isinstance(p, str) or isinstance(p, int):
+            if isinstance(p, (str, int)):
                 issue_data["fields"]["project"] = {"id": self.project(str(p)).id}
 
             p = issue_data["fields"]["issuetype"]
@@ -1579,7 +1600,6 @@ class JIRA:
         url = self.server_url + "/rest/servicedeskapi/servicedesk"
         headers = {"X-ExperimentalApi": "opt-in"}
         r_json = json_loads(self._session.get(url, headers=headers))
-        print(r_json)
         projects = [
             ServiceDesk(self._options, self._session, raw_project_json)
             for raw_project_json in r_json["values"]
@@ -1628,7 +1648,7 @@ class JIRA:
         p = data["serviceDeskId"]
         service_desk = None
 
-        if isinstance(p, str) or isinstance(p, int):
+        if isinstance(p, (str, int)):
             service_desk = self.service_desk(p)
         elif isinstance(p, ServiceDesk):
             service_desk = p
@@ -1736,9 +1756,15 @@ class JIRA:
         try:
             user_obj: User
             if self._is_cloud:
-                user_obj = self.search_users(query=user, maxResults=1)[0]
+                users = self.search_users(query=user, maxResults=20)
             else:
-                user_obj = self.search_users(user=user, maxResults=1)[0]
+                users = self.search_users(user=user, maxResults=20)
+
+            matches = []
+            if len(users) > 1:
+                matches = [u for u in users if self._get_user_identifier(u) == user]
+            user_obj = matches[0] if matches else users[0]
+
         except Exception as e:
             raise JIRAError(str(e))
         return self._get_user_identifier(user_obj)
@@ -1756,7 +1782,7 @@ class JIRA:
         Returns:
             bool
         """
-        url = self._get_latest_url(f"issue/{str(issue)}/assignee")
+        url = self._get_latest_url(f"issue/{issue}/assignee")
         user_id = self._get_user_id(assignee)
         payload = {"accountId": user_id} if self._is_cloud else {"name": user_id}
         r = self._session.put(url, data=json.dumps(payload))
@@ -1777,7 +1803,7 @@ class JIRA:
         params = {}
         if expand is not None:
             params["expand"] = expand
-        r_json = self._get_json(f"issue/{str(issue)}/comment", params=params)
+        r_json = self._get_json(f"issue/{issue}/comment", params=params)
 
         comments = [
             Comment(self._options, self._session, raw_comment_json)
@@ -2109,6 +2135,32 @@ class JIRA:
         return self._find_for_resource(Votes, issue)
 
     @translate_resource_args
+    def project_issue_security_level_scheme(
+        self, project: str
+    ) -> IssueSecurityLevelScheme:
+        """Get a IssueSecurityLevelScheme Resource from the server.
+
+        Args:
+            project (str): ID or key of the project to get the IssueSecurityLevelScheme for
+
+        Returns:
+            IssueSecurityLevelScheme: The issue security level scheme
+        """
+        return self._find_for_resource(IssueSecurityLevelScheme, project)
+
+    @translate_resource_args
+    def project_notification_scheme(self, project: str) -> NotificationScheme:
+        """Get a NotificationScheme Resource from the server.
+
+        Args:
+            project (str): ID or key of the project to get the NotificationScheme for
+
+        Returns:
+            NotificationScheme: The notification scheme
+        """
+        return self._find_for_resource(NotificationScheme, project)
+
+    @translate_resource_args
     def project_permissionscheme(self, project: str) -> PermissionScheme:
         """Get a PermissionScheme Resource from the server.
 
@@ -2120,6 +2172,30 @@ class JIRA:
             PermissionScheme: The permission scheme
         """
         return self._find_for_resource(PermissionScheme, project)
+
+    @translate_resource_args
+    def project_priority_scheme(self, project: str) -> PriorityScheme:
+        """Get a PriorityScheme Resource from the server.
+
+        Args:
+            project (str): ID or key of the project to get the PriorityScheme for
+
+        Returns:
+            PriorityScheme: The priority scheme
+        """
+        return self._find_for_resource(PriorityScheme, project)
+
+    @translate_resource_args
+    def project_workflow_scheme(self, project: str) -> WorkflowScheme:
+        """Get a WorkflowScheme Resource from the server.
+
+        Args:
+            project (str): ID or key of the project to get the WorkflowScheme for
+
+        Returns:
+            WorkflowScheme: The workflow scheme
+        """
+        return self._find_for_resource(WorkflowScheme, project)
 
     @translate_resource_args
     def add_vote(self, issue: str) -> Response:
@@ -2790,7 +2866,7 @@ class JIRA:
         startAt: int = 0,
         maxResults: int = 50,
         validate_query: bool = True,
-        fields: Optional[Union[str, List[str]]] = None,
+        fields: Optional[Union[str, List[str]]] = "*all",
         expand: Optional[str] = None,
         json_result: bool = False,
     ) -> Union[List[Dict[str, Any]], ResultList[Issue]]:
@@ -2815,8 +2891,6 @@ class JIRA:
         """
         if isinstance(fields, str):
             fields = fields.split(",")
-        else:
-            fields = list(fields or [])
 
         # this will translate JQL field names to REST API Name
         # most people do know the JQL names so this will help them use the API easier
@@ -3608,15 +3682,14 @@ class JIRA:
         """
         if self._magic is not None:
             return self._magic.id_buffer(buff)
-        else:
-            try:
-                return mimetypes.guess_type("f." + str(imghdr.what(0, buff)))[0]
-            except (OSError, TypeError):
-                self.log.warning(
-                    "Couldn't detect content type of avatar image"
-                    ". Specify the 'contentType' parameter explicitly."
-                )
-                return None
+        try:
+            return mimetypes.guess_type("f." + str(imghdr.what(0, buff)))[0]
+        except (OSError, TypeError):
+            self.log.warning(
+                "Couldn't detect content type of avatar image"
+                ". Specify the 'contentType' parameter explicitly."
+            )
+            return None
 
     def rename_user(self, old_user: str, new_user: str):
         """Rename a Jira user.
@@ -3657,9 +3730,8 @@ class JIRA:
         r = self._session.delete(url)
         if 200 <= r.status_code <= 299:
             return True
-        else:
-            self.log.error(r.status_code)
-            return False
+        self.log.error(r.status_code)
+        return False
 
     def deactivate_user(self, username: str) -> Union[str, int]:
         """Disable/deactivate the user.
@@ -3697,11 +3769,10 @@ class JIRA:
                 )
                 if r.status_code == 200:
                     return True
-                else:
-                    self.log.warning(
-                        f"Got response from deactivating {username}: {r.status_code}"
-                    )
-                    return r.status_code
+                self.log.warning(
+                    f"Got response from deactivating {username}: {r.status_code}"
+                )
+                return r.status_code
             except Exception as e:
                 self.log.error(f"Error Deactivating {username}: {e}")
                 raise JIRAError(f"Error Deactivating {username}: {e}")
@@ -3725,11 +3796,10 @@ class JIRA:
                 )
                 if r.status_code == 200:
                     return True
-                else:
-                    self.log.warning(
-                        f"Got response from deactivating {username}: {r.status_code}"
-                    )
-                    return r.status_code
+                self.log.warning(
+                    f"Got response from deactivating {username}: {r.status_code}"
+                )
+                return r.status_code
             except Exception as e:
                 self.log.error(f"Error Deactivating {username}: {e}")
                 raise JIRAError(f"Error Deactivating {username}: {e}")
@@ -3748,11 +3818,7 @@ class JIRA:
         """
         # /secure/admin/IndexAdmin.jspa
         # /secure/admin/jira/IndexProgress.jspa?taskId=1
-        if background:
-            indexingStrategy = "background"
-        else:
-            indexingStrategy = "stoptheworld"
-
+        indexingStrategy = "background" if background else "stoptheworld"
         url = self.server_url + "/secure/admin/jira/IndexReIndex.jspa"
 
         r = self._session.get(url, headers=self._options["headers"])
@@ -3762,7 +3828,7 @@ class JIRA:
 
         if (
             not r.text.find("To perform the re-index now, please go to the")
-            and force is False
+            and not force
         ):
             return True
 
@@ -3796,9 +3862,8 @@ class JIRA:
             r = self._session.post(url, headers=self._options["headers"], data=payload)
             if r.status_code == 200:
                 return True
-            else:
-                self.log.warning(f"Got {r.status_code} response from calling backup.")
-                return r.status_code
+            self.log.warning(f"Got {r.status_code} response from calling backup.")
+            return r.status_code
         except Exception as e:
             self.log.error("I see %s", e)
 
@@ -3974,6 +4039,21 @@ class JIRA:
         return data["permissionSchemes"]
 
     @lru_cache(maxsize=None)
+    def issue_type_schemes(self) -> List[IssueTypeScheme]:
+        """Get all issue type schemes defined (Admin required).
+
+        Returns:
+            List[IssueTypeScheme]: All the Issue Type Schemes available to the currently logged in user.
+        """
+
+        url = self._get_url("issuetypescheme")
+
+        r = self._session.get(url)
+        data: Dict[str, Any] = json_loads(r)
+
+        return data["schemes"]
+
+    @lru_cache(maxsize=None)
     def issuesecurityschemes(self):
 
         url = self._get_url("issuesecurityschemes")
@@ -4057,6 +4137,20 @@ class JIRA:
         data = json_loads(r)
 
         self.permissionschemes.cache_clear()
+        return data
+
+    def get_issue_type_scheme_associations(self, id: str) -> List[Project]:
+        """For the specified issue type scheme, returns all of the associated projects. (Admin required)
+
+        Args:
+            id (str): The issue type scheme id.
+
+        Returns:
+            List[Project]: Associated Projects for the Issue Type Scheme.
+        """
+        url = self._get_url(f"issuetypescheme/{id}/associations")
+        r = self._session.get(url)
+        data = json_loads(r)
         return data
 
     def create_project(
@@ -4352,9 +4446,8 @@ class JIRA:
         r = self._session.get(url, headers=self._options["headers"], params=params)
         return json_loads(r)
 
-    # Jira Agile specific methods (GreenHopper)
     """
-    Define the functions that interact with GreenHopper.
+    Define the functions that interact with Jira Agile.
     """
 
     @translate_resource_args
@@ -4377,8 +4470,6 @@ class JIRA:
 
         Returns:
             ResultList[Board]
-
-        When old GreenHopper private API is used, paging is not enabled and all parameters are ignored.
         """
         params = {}
         if type:
@@ -4388,110 +4479,54 @@ class JIRA:
         if projectKeyOrID:
             params["projectKeyOrId"] = projectKeyOrID
 
-        if (
-            self._options["agile_rest_path"]
-            == GreenHopperResource.GREENHOPPER_REST_PATH
-        ):
-            # Old, private API did not support pagination, all records were present in response,
-            #   and no parameters were supported.
-            if startAt or maxResults or params:
-                warnings.warn(
-                    "Old private GreenHopper API is used, all parameters will be ignored.",
-                    Warning,
-                )
-
-            r_json: Dict[str, Any] = self._get_json(
-                "rapidviews/list", base=self.AGILE_BASE_URL
-            )
-            boards = [
-                Board(self._options, self._session, raw_boards_json)
-                for raw_boards_json in r_json["views"]
-            ]
-            return ResultList(boards, 0, len(boards), len(boards), True)
-        else:
-            return self._fetch_pages(
-                Board,
-                "values",
-                "board",
-                startAt,
-                maxResults,
-                params,
-                base=self.AGILE_BASE_URL,
-            )
+        return self._fetch_pages(
+            Board,
+            "values",
+            "board",
+            startAt,
+            maxResults,
+            params,
+            base=self.AGILE_BASE_URL,
+        )
 
     @translate_resource_args
     def sprints(
         self,
         board_id: int,
-        extended: bool = False,
+        extended: Optional[bool] = None,
         startAt: int = 0,
         maxResults: int = 50,
         state: str = None,
     ) -> ResultList[Sprint]:
-        """Get a list of sprint GreenHopperResources.
+        """Get a list of sprint Resources.
 
         Args:
             board_id (int): the board to get sprints from
-            extended (bool): Used only by old GreenHopper API to fetch additional information like
-              startDate, endDate, completeDate, much slower because it requires an additional requests for each sprint.
-              New Jira Agile API always returns this information without a need for additional requests.
+            extended (bool): Deprecated.
             startAt (int): the index of the first sprint to return (0 based)
             maxResults (int): the maximum number of sprints to return
             state (str): Filters results to sprints in specified states. Valid values: `future`, `active`, `closed`.
               You can define multiple states separated by commas
 
         Returns:
-            ResultList[Sprint]: (content depends on API version, but always contains id, name, state, startDate and endDate)
-            When old GreenHopper private API is used, paging is not enabled,
-            and `startAt`, `maxResults` and `state` parameters are ignored.
+            ResultList[Sprint]: List of sprints.
         """
         params = {}
         if state:
             params["state"] = state
 
-        if (
-            self._options["agile_rest_path"]
-            == GreenHopperResource.GREENHOPPER_REST_PATH
-        ):
-            r_json: Dict[str, Any] = self._get_json(
-                "sprintquery/%s?includeHistoricSprints=true&includeFutureSprints=true"
-                % board_id,
-                base=self.AGILE_BASE_URL,
-            )
+        if extended is not None:
+            DeprecationWarning("The `extended` argument is deprecated")
 
-            if params:
-                warnings.warn(
-                    "Old private GreenHopper API is used, parameters %s will be ignored."
-                    % params,
-                    Warning,
-                )
-
-            if extended:
-                sprints = [
-                    Sprint(
-                        self._options,
-                        self._session,
-                        self.sprint_info("", raw_sprints_json["id"]),
-                    )
-                    for raw_sprints_json in r_json["sprints"]
-                ]
-            else:
-                sprints = [
-                    Sprint(self._options, self._session, raw_sprints_json)
-                    for raw_sprints_json in r_json["sprints"]
-                ]
-
-            return ResultList(sprints, 0, len(sprints), len(sprints), True)
-        else:
-            return self._fetch_pages(
-                Sprint,
-                "values",
-                f"board/{board_id}/sprint",
-                startAt,
-                maxResults,
-                params,
-                self.AGILE_BASE_URL,
-            )
+        return self._fetch_pages(
+            Sprint,
+            "values",
+            f"board/{board_id}/sprint",
+            startAt,
+            maxResults,
+            params,
+            self.AGILE_BASE_URL,
+        )
 
     def sprints_by_name(self, id, extended=False):
         sprints = {}
@@ -4511,13 +4546,6 @@ class JIRA:
         if endDate:
             payload["endDate"] = endDate
         if state:
-            if (
-                self._options["agile_rest_path"]
-                == GreenHopperResource.GREENHOPPER_REST_PATH
-            ):
-                raise NotImplementedError(
-                    "Public Jira API does not support state update"
-                )
             payload["state"] = state
 
         url = self._get_url(f"sprint/{id}", base=self.AGILE_BASE_URL)
@@ -4588,49 +4616,50 @@ class JIRA:
     def create_board(
         self,
         name: str,
-        project_ids: Union[str, List[str]],
+        filter_id: str,
+        project_ids: str = None,
         preset: str = "scrum",
-        location_type: str = "user",
+        location_type: Literal["user", "project"] = "user",
         location_id: Optional[str] = None,
     ) -> Board:
         """Create a new board for the ``project_ids``.
 
         Args:
-            name (str): name of the board
-            project_ids (str): the projects to create the board in
-            preset (str): What preset to use for this board, options: kanban, scrum, diy. (Default: scrum)
-            location_type (str): the location type. Available in cloud. (Default: user)
-            location_id (Optional[str]): the id of project that the board should be located under.
-             Omit this for a 'user' location_type. Available in cloud.
+            name (str): name of the Board (<255 characters).
+            filter_id (str): the Filter to use to create the Board.
+              Note: if the user does not have the 'Create shared objects' permission and tries to create
+              a shared board, a private board will be created instead
+              (remember that board sharing depends on the filter sharing).
+            project_ids (str): Deprecated. See location_id.
+            preset (str): What preset/type to use for this Board, options: kanban, scrum, agility. (Default: scrum)
+            location_type (str): the location type. Available in Cloud. (Default: user)
+            location_id (Optional[str]):  aka ``projectKeyOrId``.
+              The id of Project that the Board should be located under.
+              Omit this for a 'user' location_type. Available in Cloud.
 
         Returns:
             Board: The newly created board
         """
-        if (
-            self._options["agile_rest_path"]
-            != GreenHopperResource.GREENHOPPER_REST_PATH
-        ):
-            raise NotImplementedError(
-                "Jira Agile Public API does not support this request"
+        payload: Dict[str, Any] = {}
+
+        if project_ids is not None:
+            DeprecationWarning(
+                "project_ids is deprecated and ignored. "
+                + "Use filter_id and location_id with `location_type='project'`"
             )
 
-        payload: Dict[str, Any] = {}
-        if isinstance(project_ids, str):
-            ids = []
-            for p in project_ids.split(","):
-                ids.append(self.project(p).id)
-            project_ids = ",".join(ids)
         if location_id is not None:
             location_id = self.project(location_id).id
+
         payload["name"] = name
-        if isinstance(project_ids, str):
-            project_ids = project_ids.split(",")  # type: ignore # re-use of variable
-        payload["projectIds"] = project_ids
-        payload["preset"] = preset
+        payload["filterId"] = filter_id
+        payload["type"] = preset
         if self._is_cloud:
-            payload["locationType"] = location_type
-            payload["locationId"] = location_id
-        url = self._get_url("rapidview/create/presets", base=self.AGILE_BASE_URL)
+            payload["location"] = {"type": location_type}
+            if location_type not in ("user",):
+                payload["location"].update({"projectKeyOrId": location_id})
+
+        url = self._get_url("board", base=self.AGILE_BASE_URL)
         r = self._session.post(url, data=json.dumps(payload))
 
         raw_issue_json = json_loads(r)
@@ -4661,35 +4690,10 @@ class JIRA:
             payload["endDate"] = endDate
 
         raw_issue_json: Dict[str, Any]
-        if (
-            self._options["agile_rest_path"]
-            == GreenHopperResource.GREENHOPPER_REST_PATH
-        ):
-            url = self._get_url(f"sprint/{board_id}", base=self.AGILE_BASE_URL)
-            r = self._session.post(url)
-            raw_issue_json = json_loads(r)
-            """ now r contains something like:
-            {
-                  "id": 742,
-                  "name": "Sprint 89",
-                  "state": "FUTURE",
-                  "linkedPagesCount": 0,
-                  "startDate": "None",
-                  "endDate": "None",
-                  "completeDate": "None",
-                  "remoteLinks": []
-            }"""
-
-            url = self._get_url(
-                f"sprint/{raw_issue_json['id']}", base=self.AGILE_BASE_URL
-            )
-            r = self._session.put(url, data=json.dumps(payload))
-            raw_issue_json = json_loads(r)
-        else:
-            url = self._get_url("sprint", base=self.AGILE_BASE_URL)
-            payload["originBoardId"] = board_id
-            r = self._session.post(url, data=json.dumps(payload))
-            raw_issue_json = json_loads(r)
+        url = self._get_url("sprint", base=self.AGILE_BASE_URL)
+        payload["originBoardId"] = board_id
+        r = self._session.post(url, data=json.dumps(payload))
+        raw_issue_json = json_loads(r)
 
         return Sprint(self._options, self._session, raw=raw_issue_json)
 
@@ -4713,69 +4717,30 @@ class JIRA:
         Returns:
             Response
         """
-        if self._options["agile_rest_path"] == GreenHopperResource.AGILE_BASE_REST_PATH:
-            url = self._get_url(f"sprint/{sprint_id}/issue", base=self.AGILE_BASE_URL)
-            payload = {"issues": issue_keys}
-            try:
-                return self._session.post(url, data=json.dumps(payload))
-            except JIRAError as e:
-                if e.status_code == 404:
-                    warnings.warn(
-                        "Status code 404 may mean, that too old Jira Agile version is installed."
-                        " At least version 6.7.10 is required."
-                    )
-                raise
-        elif (
-            self._options["agile_rest_path"]
-            == GreenHopperResource.GREENHOPPER_REST_PATH
-        ):
-            # In old, private API the function does not exist anymore and we need to use
-            # issue.update() to perform this operation
-            # Workaround based on https://answers.atlassian.com/questions/277651/jira-agile-rest-api-example
-
-            sprint_field_id = self._get_sprint_field_id()
-
-            data = {
-                "idOrKeys": issue_keys,
-                "customFieldId": sprint_field_id,
-                "sprintId": sprint_id,
-                "addToBacklog": False,
-            }
-            url = self._get_url("sprint/rank", base=self.AGILE_BASE_URL)
-            return self._session.put(url, data=json.dumps(data))
-        else:
-            raise NotImplementedError(
-                'No API for adding issues to sprint for agile_rest_path="%s"'
-                % self._options["agile_rest_path"]
-            )
+        url = self._get_url(f"sprint/{sprint_id}/issue", base=self.AGILE_BASE_URL)
+        payload = {"issues": issue_keys}
+        return self._session.post(url, data=json.dumps(payload))
 
     def add_issues_to_epic(
-        self, epic_id: str, issue_keys: str, ignore_epics: bool = True
+        self, epic_id: str, issue_keys: str, ignore_epics: bool = None
     ) -> Response:
         """Add the issues in ``issue_keys`` to the ``epic_id``.
+
+        Issues can only exist in one Epic!
 
         Args:
             epic_id (str): The ID for the epic where issues should be added.
             issue_keys (str): The issues to add to the epic
-            ignore_epics (bool): ignore any issues listed in ``issue_keys`` that are epics. (Default: True)
+            ignore_epics (bool): Deprecated.
 
         """
-        if (
-            self._options["agile_rest_path"]
-            != GreenHopperResource.GREENHOPPER_REST_PATH
-        ):
-            # TODO(ssbarnea): simulate functionality using issue.update()?
-            raise NotImplementedError(
-                "Jira Agile Public API does not support this request"
-            )
-
         data: Dict[str, Any] = {}
-        data["issueKeys"] = issue_keys
-        data["ignoreEpics"] = ignore_epics
-        url = self._get_url(f"epics/{epic_id}/add", base=self.AGILE_BASE_URL)
+        data["issues"] = issue_keys  # TODO: List[str]
+        if ignore_epics is not None:
+            DeprecationWarning("`ignore_epics` is Deprecated")
+        url = self._get_url(f"epics/{epic_id}/issue", base=self.AGILE_BASE_URL)
         return self._session.put(url, data=json.dumps(data))
 
-    # TODO(ssbarnea): Jira Agile API supports moving more than one issue.
     def rank(
         self,
         issue: str,
@@ -4791,6 +4756,7 @@ class JIRA:
             next_issue (str): issue key that the first issue is to be ranked before.
             prev_issue (str): issue key that the first issue is to be ranked after.
         """
+        # TODO: Jira Agile API supports moving more than one issue.
 
         if next_issue is None and prev_issue is None:
             raise ValueError("One of 'next_issue' or 'prev_issue' must be specified")
@@ -4827,67 +4793,17 @@ class JIRA:
             f"rank{before_or_after}Issue": other_issue,
             "rankCustomFieldId": self._rank,
         }
-        try:
-            return self._session.put(url, data=json.dumps(payload))
-        except JIRAError as e:
-            if e.status_code == 404:
-                warnings.warn(
-                    "Status code 404 may mean, that too old Jira Agile version is installed."
-                    " At least version 6.7.10 is required."
-                )
-            raise
+        return self._session.put(url, data=json.dumps(payload))
 
-    def move_to_backlog(self, issue_keys: str) -> Response:
+    def move_to_backlog(self, issue_keys: List[str]) -> Response:
         """Move issues in ``issue_keys`` to the backlog, removing them from all sprints that have not been completed.
 
         Args:
-            issue_keys (str): the issues to move to the backlog
+            issue_keys (List[str]): the issues to move to the backlog
 
         Raises:
             JIRAError: If moving issues to backlog fails
         """
-        if self._options["agile_rest_path"] == GreenHopperResource.AGILE_BASE_REST_PATH:
-            url = self._get_url("backlog/issue", base=self.AGILE_BASE_URL)
-            payload = {"issues": issue_keys}
-            try:
-                return self._session.post(url, data=json.dumps(payload))
-            except JIRAError as e:
-                if e.status_code == 404:
-                    warnings.warn(
-                        "Status code 404 may mean, that too old Jira Agile version is installed."
-                        " At least version 6.7.10 is required."
-                    )
-                raise
-        elif (
-            self._options["agile_rest_path"]
-            == GreenHopperResource.GREENHOPPER_REST_PATH
-        ):
-            # In old, private API the function does not exist anymore and we need to use
-            # issue.update() to perform this operation
-            # Workaround based on https://answers.atlassian.com/questions/277651/jira-agile-rest-api-example
-
-            sprint_field_id = self._get_sprint_field_id()
-
-            data = {
-                "idOrKeys": issue_keys,
-                "customFieldId": sprint_field_id,
-                "addToBacklog": True,
-            }
-            url = self._get_url("sprint/rank", base=self.AGILE_BASE_URL)
-            return self._session.put(url, data=json.dumps(data))
-        else:
-            raise NotImplementedError(
-                'No API for moving issues to backlog for agile_rest_path="%s"'
-                % self._options["agile_rest_path"]
-            )
-
-
-class GreenHopper(JIRA):
-    def __init__(self, options=None, basic_auth=None, oauth=None, async_=None):
-        warnings.warn(
-            "GreenHopper() class is deprecated, just use JIRA() instead.",
-            DeprecationWarning,
-        )
-        JIRA.__init__(
-            self, options=options, basic_auth=basic_auth, oauth=oauth, async_=async_
-        )
+        url = self._get_url("backlog/issue", base=self.AGILE_BASE_URL)
+        payload = {"issues": issue_keys}  # TODO: should be list of issues
+        return self._session.post(url, data=json.dumps(payload))

@@ -42,9 +42,14 @@ __all__ = (
     "Worklog",
     "IssueLink",
     "IssueLinkType",
+    "IssueSecurityLevelScheme",
     "IssueType",
+    "IssueTypeScheme",
+    "NotificationScheme",
     "Priority",
+    "PriorityScheme",
     "Version",
+    "WorkflowScheme",
     "Role",
     "Resolution",
     "SecurityLevel",
@@ -693,6 +698,27 @@ class Issue(Resource):
 
         super().update(async_=async_, jira=jira, notify=notify, fields=data)
 
+    def get_field(self, field_name: str) -> Any:
+        """Obtain the (parsed) value from the Issue's field.
+
+        Args:
+            field_name (str): The name of the field to get
+
+        Raises:
+            AttributeError: If the field does not exist or if the field starts with an ``_``
+
+        Returns:
+            Any: Returns the parsed data stored in the field. For example, "project" would be of class :py:class:`Project`
+        """
+
+        if field_name.startswith("_"):
+            raise AttributeError(
+                f"An issue field_name cannot start with underscore (_): {field_name}",
+                field_name,
+            )
+        else:
+            return getattr(self.fields, field_name)
+
     def add_field_value(self, field: str, value: str):
         """Add a value to a field that supports multiple values, without resetting the existing values.
 
@@ -799,12 +825,70 @@ class Votes(Resource):
         self.raw: Dict[str, Any] = cast(Dict[str, Any], self.raw)
 
 
+class IssueTypeScheme(Resource):
+    """An issue type scheme."""
+
+    def __init__(self, options, session, raw=None):
+        Resource.__init__(self, "issuetypescheme", options, session)
+        if raw:
+            self._parse_raw(raw)
+        self.raw: Dict[str, Any] = cast(Dict[str, Any], self.raw)
+
+
+class IssueSecurityLevelScheme(Resource):
+    """IssueSecurityLevelScheme information on an project."""
+
+    def __init__(self, options, session, raw=None):
+        Resource.__init__(
+            self, "project/{0}/issuesecuritylevelscheme?expand=user", options, session
+        )
+        if raw:
+            self._parse_raw(raw)
+        self.raw: Dict[str, Any] = cast(Dict[str, Any], self.raw)
+
+
+class NotificationScheme(Resource):
+    """NotificationScheme information on an project."""
+
+    def __init__(self, options, session, raw=None):
+        Resource.__init__(
+            self, "project/{0}/notificationscheme?expand=user", options, session
+        )
+        if raw:
+            self._parse_raw(raw)
+        self.raw: Dict[str, Any] = cast(Dict[str, Any], self.raw)
+
+
 class PermissionScheme(Resource):
     """Permissionscheme information on an project."""
 
     def __init__(self, options, session, raw=None):
         Resource.__init__(
             self, "project/{0}/permissionscheme?expand=user", options, session
+        )
+        if raw:
+            self._parse_raw(raw)
+        self.raw: Dict[str, Any] = cast(Dict[str, Any], self.raw)
+
+
+class PriorityScheme(Resource):
+    """PriorityScheme information on an project."""
+
+    def __init__(self, options, session, raw=None):
+        Resource.__init__(
+            self, "project/{0}/priorityscheme?expand=user", options, session
+        )
+        if raw:
+            self._parse_raw(raw)
+        self.raw: Dict[str, Any] = cast(Dict[str, Any], self.raw)
+
+
+class WorkflowScheme(Resource):
+    """WorkflowScheme information on an project."""
+
+    def __init__(self, options, session, raw=None):
+        Resource.__init__(
+            self, "project/{0}/workflowscheme?expand=user", options, session
         )
         if raw:
             self._parse_raw(raw)
@@ -1182,20 +1266,16 @@ class Version(Resource):
         super().update(**data)
 
 
-# GreenHopper
+# Agile
 
 
-class GreenHopperResource(Resource):
-    """A generic GreenHopper resource."""
+class AgileResource(Resource):
+    """A generic Agile resource. Also known as Jira Agile Server, Jira Software and formerly GreenHopper."""
 
     AGILE_BASE_URL = "{server}/rest/{agile_rest_path}/{agile_rest_api_version}/{path}"
 
-    GREENHOPPER_REST_PATH = "greenhopper"
-    """ Old, private API. Deprecated and will be removed from Jira on the 1st February 2016. """
-    AGILE_EXPERIMENTAL_REST_PATH = "greenhopper/experimental-api"
-    """ Experimental API available in Jira Agile 6.7.3 - 6.7.6, basically the same as Public API """
     AGILE_BASE_REST_PATH = "agile"
-    """ Public API introduced in Jira Agile 6.7.7. """
+    """Public API introduced in Jira Agile 6.7.7."""
 
     def __init__(
         self,
@@ -1209,14 +1289,11 @@ class GreenHopperResource(Resource):
         Resource.__init__(self, path, options, session, self.AGILE_BASE_URL)
         if raw:
             self._parse_raw(raw)
-            # Old GreenHopper API did not contain self - create it for backward compatibility.
-            if not self.self:
-                self.self = self._get_url(path.format(raw["id"]))
         self.raw: Dict[str, Any] = cast(Dict[str, Any], self.raw)
 
 
-class Sprint(GreenHopperResource):
-    """A GreenHopper sprint."""
+class Sprint(AgileResource):
+    """An Agile sprint."""
 
     def __init__(
         self,
@@ -1224,22 +1301,11 @@ class Sprint(GreenHopperResource):
         session: ResilientSession,
         raw: Dict[str, Any] = None,
     ):
-        GreenHopperResource.__init__(self, "sprint/{0}", options, session, raw)
-
-    def find(self, id, params=None):
-        if (
-            self._options["agile_rest_path"]
-            != GreenHopperResource.GREENHOPPER_REST_PATH
-        ):
-            Resource.find(self, id, params)
-        else:
-            # Old, private GreenHopper API had non-standard way of loading Sprint
-            url = self._get_url(f"sprint/{id}/edit/model")
-            self._load(url, params=params, path="sprint")
+        AgileResource.__init__(self, "sprint/{0}", options, session, raw)
 
 
-class Board(GreenHopperResource):
-    """A GreenHopper board."""
+class Board(AgileResource):
+    """An Agile board."""
 
     def __init__(
         self,
@@ -1247,23 +1313,7 @@ class Board(GreenHopperResource):
         session: ResilientSession,
         raw: Dict[str, Any] = None,
     ):
-        path = (
-            "rapidview/{0}"
-            if options["agile_rest_path"] == self.GREENHOPPER_REST_PATH
-            else "board/{id}"
-        )
-        GreenHopperResource.__init__(self, path, options, session, raw)
-
-    def delete(self, params=None):
-        if (
-            self._options["agile_rest_path"]
-            != GreenHopperResource.GREENHOPPER_REST_PATH
-        ):
-            raise NotImplementedError(
-                "Jira Agile Public API does not support Board removal"
-            )
-
-        Resource.delete(self, params)
+        AgileResource.__init__(self, "board/{id}", options, session, raw)
 
 
 # Service Desk
@@ -1407,10 +1457,15 @@ resource_class_map: Dict[str, Type[Resource]] = {
     r"issueLink/[^/]+$": IssueLink,
     r"issueLinkType/[^/]+$": IssueLinkType,
     r"issuetype/[^/]+$": IssueType,
+    r"issuetypescheme/[^/]+$": IssueTypeScheme,
+    r"project/[^/]+/issuesecuritylevelscheme[^/]+$": IssueSecurityLevelScheme,
+    r"project/[^/]+/notificationscheme[^/]+$": NotificationScheme,
+    r"project/[^/]+/priorityscheme[^/]+$": PriorityScheme,
     r"priority/[^/]+$": Priority,
     r"project/[^/]+$": Project,
     r"project/[^/]+/role/[^/]+$": Role,
     r"project/[^/]+/permissionscheme[^/]+$": PermissionScheme,
+    r"project/[^/]+/workflowscheme[^/]+$": WorkflowScheme,
     r"resolution/[^/]+$": Resolution,
     r"securitylevel/[^/]+$": SecurityLevel,
     r"status/[^/]+$": Status,
@@ -1418,7 +1473,7 @@ resource_class_map: Dict[str, Type[Resource]] = {
     r"user\?(username|key|accountId).+$": User,
     r"group\?groupname.+$": Group,
     r"version/[^/]+$": Version,
-    # GreenHopper specific resources
+    # Agile specific resources
     r"sprints/[^/]+$": Sprint,
     r"views/[^/]+$": Board,
 }
