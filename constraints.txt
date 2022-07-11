@@ -22,7 +22,7 @@ cffi==1.15.0
     # via cryptography
 charset-normalizer==2.0.12
     # via requests
-colorama==0.4.4
+colorama==0.4.5
     # via
     #   ipython
     #   pytest
@@ -144,7 +144,7 @@ pywin32-ctypes==0.2.0
     # via keyring
 pyyaml==6.0
     # via jira (setup.cfg)
-requests==2.27.1
+requests==2.28.1
     # via
     #   jira (setup.cfg)
     #   requests-futures
@@ -175,7 +175,7 @@ six==1.16.0
     #   requests-mock
 snowballstemmer==2.2.0
     # via sphinx
-sphinx==5.0.1
+sphinx==5.0.2
     # via
     #   jira (setup.cfg)
     #   sphinx-rtd-theme
