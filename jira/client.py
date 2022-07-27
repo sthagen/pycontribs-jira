@@ -1803,6 +1803,9 @@ class JIRA:
             else:
                 users = self.search_users(user=user, maxResults=20)
 
+            if len(users) < 1:
+                raise JIRAError(f"No matching user found for: '{user}'")
+
             matches = []
             if len(users) > 1:
                 matches = [u for u in users if self._get_user_identifier(u) == user]
@@ -2927,6 +2930,8 @@ class JIRA:
         """
         if isinstance(fields, str):
             fields = fields.split(",")
+        elif fields is None:
+            fields = ["*all"]
 
         # this will translate JQL field names to REST API Name
         # most people do know the JQL names so this will help them use the API easier
