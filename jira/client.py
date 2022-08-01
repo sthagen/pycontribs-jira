@@ -32,6 +32,7 @@ from typing import (
     List,
     Literal,
     Optional,
+    SupportsIndex,
     Tuple,
     Type,
     TypeVar,
@@ -98,10 +99,6 @@ try:
 except ImportError:
     pass
 
-try:
-    from typing import SupportsIndex  # type:ignore[attr-defined] # Py38+
-except ImportError:
-    from typing_extensions import SupportsIndex
 
 LOG = _logging.getLogger("jira")
 LOG.addHandler(_logging.NullHandler())
@@ -1005,8 +1002,8 @@ class JIRA:
                 )
 
         fname = filename
-        if not fname and isinstance(attachment, BufferedReader):
-            fname = os.path.basename(attachment.name)
+        if not fname and isinstance(attachment_io, BufferedReader):
+            fname = os.path.basename(attachment_io.name)
 
         def generate_multipartencoded_request_args() -> Tuple[
             MultipartEncoder, CaseInsensitiveDict
