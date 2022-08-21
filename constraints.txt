@@ -114,7 +114,7 @@ pyparsing==3.0.7
     # via packaging
 pyspnego==0.5.4
     # via requests-kerberos
-pytest==7.1.1
+pytest==7.1.2
     # via
     #   jira (setup.cfg)
     #   pytest-cache
