@@ -67,6 +67,7 @@ from jira.resources import (
     Issue,
     IssueLink,
     IssueLinkType,
+    IssueProperty,
     IssueSecurityLevelScheme,
     IssueType,
     IssueTypeScheme,
@@ -2400,6 +2401,49 @@ class JIRA:
         r = self._session.post(url, params=params, data=json.dumps(data))
 
         return Worklog(self._options, self._session, json_loads(r))
+
+    # Issue properties
+
+    @translate_resource_args
+    def issue_properties(self, issue: str) -> List[IssueProperty]:
+        """Get a list of issue property Resource from the server for an issue.
+
+        Args:
+            issue (str): ID or key of the issue to get properties from
+
+        Returns:
+            List[IssueProperty]
+        """
+        r_json = self._get_json(f"issue/{issue}/properties")
+        properties = [self.issue_property(issue, key["key"]) for key in r_json["keys"]]
+        return properties
+
+    @translate_resource_args
+    def issue_property(self, issue: str, key: str) -> IssueProperty:
+        """Get a specific issue property Resource from the server.
+
+        Args:
+            issue (str): ID or key of the issue to get the property from
+            key (str): Key of the property to get
+        Returns:
+            IssueProperty
+        """
+        return self._find_for_resource(IssueProperty, (issue, key))
+
+    @translate_resource_args
+    def add_issue_property(self, issue: str, key: str, data) -> Response:
+        """Add or update a specific issue property Resource.
+
+        Args:
+            issue (str): ID or key of the issue to set the property to
+            key (str): Key of the property to set
+            data: The data to set for the property
+        Returns:
+            Response
+        """
+
+        url = self._get_url(f"issue/{issue}/properties/{key}")
+        return self._session.put(url, data=json.dumps(data))
 
     # Issue links
 
@@ -4830,7 +4874,7 @@ class JIRA:
         return self._session.post(url, data=json.dumps(payload))
 
     def add_issues_to_epic(
-        self, epic_id: str, issue_keys: str, ignore_epics: bool = None
+        self, epic_id: str, issue_keys: Union[str, List[str]], ignore_epics: bool = None
     ) -> Response:
         """Add the issues in ``issue_keys`` to the ``epic_id``.
 
@@ -4838,16 +4882,19 @@ class JIRA:
 
         Args:
             epic_id (str): The ID for the epic where issues should be added.
-            issue_keys (str): The issues to add to the epic
+            issue_keys (Union[str, List[str]]): The list (or comma separated str) of issues
+              to add to the epic
             ignore_epics (bool): Deprecated.
 
         """
         data: Dict[str, Any] = {}
-        data["issues"] = issue_keys  # TODO: List[str]
+        data["issues"] = (
+            issue_keys.split(",") if isinstance(issue_keys, str) else list(issue_keys)
+        )
         if ignore_epics is not None:
             DeprecationWarning("`ignore_epics` is Deprecated")
-        url = self._get_url(f"epics/{epic_id}/issue", base=self.AGILE_BASE_URL)
-        return self._session.put(url, data=json.dumps(data))
+        url = self._get_url(f"epic/{epic_id}/issue", base=self.AGILE_BASE_URL)
+        return self._session.post(url, data=json.dumps(data))
 
     def rank(
         self,
