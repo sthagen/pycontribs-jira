@@ -203,7 +203,7 @@ tomli==2.0.1
     # via
     #   coverage
     #   pytest
-traitlets==5.1.1
+traitlets==5.3.0
     # via
     #   ipython
     #   matplotlib-inline
