@@ -110,7 +110,7 @@ pyjwt==2.4.0
     # via
     #   jira (setup.cfg)
     #   requests-jwt
-pyparsing==3.0.7
+pyparsing==3.0.9
     # via packaging
 pyspnego==0.5.4
     # via requests-kerberos
