@@ -71,7 +71,7 @@ jedi==0.18.1
     # via ipython
 jinja2==3.1.2
     # via sphinx
-keyring==23.8.2
+keyring==23.13.1
     # via jira (setup.cfg)
 markupsafe==2.1.1
     # via
