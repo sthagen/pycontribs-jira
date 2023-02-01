@@ -232,5 +232,5 @@ xmlrunner==1.7.7
     # via jira (setup.cfg)
 yanc==0.3.3
     # via jira (setup.cfg)
-zipp==3.8.1
+zipp==3.12.0
     # via importlib-metadata
