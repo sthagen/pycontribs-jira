@@ -65,7 +65,7 @@ importlib-metadata==6.0.0
     #   sphinx
 iniconfig==2.0.0
     # via pytest
-ipython==8.9.0
+ipython==8.10.0
     # via jira (setup.cfg)
 jaraco-classes==3.2.3
     # via keyring
