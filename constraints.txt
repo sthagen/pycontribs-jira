@@ -10,11 +10,11 @@ asttokens==2.2.1
     # via stack-data
 attrs==22.2.0
     # via pytest
-babel==2.11.0
+babel==2.12.1
     # via sphinx
 backcall==0.2.0
     # via ipython
-beautifulsoup4==4.11.1
+beautifulsoup4==4.11.2
     # via furo
 certifi==2022.12.7
     # via requests
@@ -27,9 +27,9 @@ colorama==0.4.6
     #   ipython
     #   pytest
     #   sphinx
-coverage==7.1.0
+coverage==7.2.1
     # via pytest-cov
-cryptography==39.0.0
+cryptography==39.0.1
     # via
     #   pyspnego
     #   requests-kerberos
@@ -81,7 +81,7 @@ markupsafe==2.1.2
     #   jira (setup.cfg)
 matplotlib-inline==0.1.6
     # via ipython
-more-itertools==9.0.0
+more-itertools==9.1.0
     # via jaraco-classes
 oauthlib==3.2.2
     # via
@@ -101,7 +101,7 @@ pickleshare==0.7.5
     # via ipython
 pluggy==1.0.0
     # via pytest
-prompt-toolkit==3.0.36
+prompt-toolkit==3.0.38
     # via ipython
 pure-eval==0.2.2
     # via stack-data
@@ -116,7 +116,7 @@ pyjwt==2.6.0
     # via
     #   jira (setup.cfg)
     #   requests-jwt
-pyspnego==0.7.0
+pyspnego==0.8.0
     # via requests-kerberos
 pytest==7.2.1
     # via
@@ -137,7 +137,7 @@ pytest-sugar==0.9.6
     # via jira (setup.cfg)
 pytest-timeout==2.1.0
     # via jira (setup.cfg)
-pytest-xdist==3.1.0
+pytest-xdist==3.2.0
     # via jira (setup.cfg)
 pytz==2022.7.1
     # via babel
@@ -192,7 +192,7 @@ sphinxcontrib-applehelp==1.0.4
     # via sphinx
 sphinxcontrib-devhelp==1.0.2
     # via sphinx
-sphinxcontrib-htmlhelp==2.0.0
+sphinxcontrib-htmlhelp==2.0.1
     # via sphinx
 sphinxcontrib-jsmath==1.0.1
     # via sphinx
@@ -214,7 +214,7 @@ traitlets==5.8.1
     # via
     #   ipython
     #   matplotlib-inline
-typing-extensions==4.4.0
+typing-extensions==4.5.0
     # via jira (setup.cfg)
 urllib3==1.26.14
     # via requests
