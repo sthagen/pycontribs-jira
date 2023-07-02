@@ -11,7 +11,6 @@ import calendar
 import copy
 import datetime
 import hashlib
-import imghdr
 import json
 import logging as _logging
 import mimetypes
@@ -42,6 +41,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 from packaging.version import parse as parse_version
+from PIL import Image
 from requests import Response
 from requests.auth import AuthBase
 from requests.structures import CaseInsensitiveDict
@@ -2342,7 +2342,9 @@ class JIRA:
             Response
         """
         url = self._get_url("issue/" + str(issue) + "/watchers")
-        return self._session.post(url, data=json.dumps(watcher))
+        # Use user_id when adding watcher
+        watcher_id = self._get_user_id(watcher)
+        return self._session.post(url, data=json.dumps(watcher_id))
 
     @translate_resource_args
     def remove_watcher(self, issue: str | int, watcher: str) -> Response:
@@ -3689,17 +3691,38 @@ class JIRA:
         self._session.auth = (username, password)
 
     def _create_oauth_session(self, oauth: dict[str, Any]):
-        from oauthlib.oauth1 import SIGNATURE_HMAC_SHA1
+        from oauthlib.oauth1 import SIGNATURE_HMAC_SHA1 as DEFAULT_SHA
         from requests_oauthlib import OAuth1
 
-        oauth_instance = OAuth1(
-            oauth["consumer_key"],
-            rsa_key=oauth["key_cert"],
-            signature_method=oauth.get("signature_method", SIGNATURE_HMAC_SHA1),
-            resource_owner_key=oauth["access_token"],
-            resource_owner_secret=oauth["access_token_secret"],
-        )
-        self._session.auth = oauth_instance
+        try:
+            from oauthlib.oauth1 import SIGNATURE_RSA as FALLBACK_SHA
+        except ImportError:
+            FALLBACK_SHA = DEFAULT_SHA
+            _logging.debug("Fallback SHA 'SIGNATURE_RSA_SHA1' could not be imported.")
+
+        for sha_type in (oauth.get("signature_method"), DEFAULT_SHA, FALLBACK_SHA):
+            if sha_type is None:
+                continue
+            oauth_instance = OAuth1(
+                oauth["consumer_key"],
+                rsa_key=oauth["key_cert"],
+                signature_method=sha_type,
+                resource_owner_key=oauth["access_token"],
+                resource_owner_secret=oauth["access_token_secret"],
+            )
+            self._session.auth = oauth_instance
+            try:
+                self.myself()
+                _logging.debug(f"OAuth1 succeeded with signature_method={sha_type}")
+                return  # successful response, return with happy session
+            except JIRAError:
+                _logging.exception(
+                    f"Failed to create OAuth session with signature_method={sha_type}.\n"
+                    + "Attempting fallback method(s)."
+                    + "Consider specifying the signature via oauth['signature_method']."
+                )
+                if sha_type is FALLBACK_SHA:
+                    raise  # We have exhausted our options, bubble up exception
 
     def _create_kerberos_session(
         self,
@@ -3898,7 +3921,7 @@ class JIRA:
         if self._magic is not None:
             return self._magic.id_buffer(buff)
         try:
-            return mimetypes.guess_type("f." + str(imghdr.what(0, buff)))[0]
+            return mimetypes.guess_type("f." + Image.open(buff).format)[0]
         except (OSError, TypeError):
             self.log.warning(
                 "Couldn't detect content type of avatar image"
