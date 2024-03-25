@@ -2076,6 +2076,86 @@ class JIRA:
                 "Use 'createmeta' instead."
             )
 
+    def createmeta_issuetypes(
+        self,
+        projectIdOrKey: str | int,
+        startAt: int = 0,
+        maxResults: int = 50,
+    ) -> dict[str, Any]:
+        """Get the issue types metadata for a given project, required to create issues.
+
+        .. deprecated:: 3.6.0
+            Use :func:`project_issue_types` instead.
+
+        This API was introduced in JIRA Server / DC 8.4 as a replacement for the more general purpose API 'createmeta'.
+        For details see: https://confluence.atlassian.com/jiracore/createmeta-rest-endpoint-to-be-removed-975040986.html
+
+        Args:
+            projectIdOrKey (Union[str, int]): id or key of the project for which to get the metadata.
+            startAt (int): Index of the first issue to return. (Default: ``0``)
+            maxResults (int): Maximum number of issues to return.
+              Total number of results is available in the ``total`` attribute of the returned :class:`ResultList`.
+              If maxResults evaluates to False, it will try to get all issues in batches. (Default: ``50``)
+
+        Returns:
+            Dict[str, Any]
+        """
+        warnings.warn(
+            "'createmeta_issuetypes' is deprecated and will be removed in future releases."
+            "Use 'project_issue_types' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self._check_createmeta_issuetypes()
+        return self._get_json(
+            f"issue/createmeta/{projectIdOrKey}/issuetypes",
+            params={
+                "startAt": startAt,
+                "maxResults": maxResults,
+            },
+        )
+
+    def createmeta_fieldtypes(
+        self,
+        projectIdOrKey: str | int,
+        issueTypeId: str | int,
+        startAt: int = 0,
+        maxResults: int = 50,
+    ) -> dict[str, Any]:
+        """Get the field metadata for a given project and issue type, required to create issues.
+
+        .. deprecated:: 3.6.0
+            Use :func:`project_issue_fields` instead.
+
+        This API was introduced in JIRA Server / DC 8.4 as a replacement for the more general purpose API 'createmeta'.
+        For details see: https://confluence.atlassian.com/jiracore/createmeta-rest-endpoint-to-be-removed-975040986.html
+
+        Args:
+            projectIdOrKey (Union[str, int]): id or key of the project for which to get the metadata.
+            issueTypeId (Union[str, int]): id of the issue type for which to get the metadata.
+            startAt (int): Index of the first issue to return. (Default: ``0``)
+            maxResults (int): Maximum number of issues to return.
+              Total number of results is available in the ``total`` attribute of the returned :class:`ResultList`.
+              If maxResults evaluates to False, it will try to get all issues in batches. (Default: ``50``)
+
+        Returns:
+            Dict[str, Any]
+        """
+        warnings.warn(
+            "'createmeta_fieldtypes' is deprecated and will be removed in future releases."
+            "Use 'project_issue_fields' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self._check_createmeta_issuetypes()
+        return self._get_json(
+            f"issue/createmeta/{projectIdOrKey}/issuetypes/{issueTypeId}",
+            params={
+                "startAt": startAt,
+                "maxResults": maxResults,
+            },
+        )
+
     def createmeta(
         self,
         projectKeys: tuple[str, str] | str | None = None,
@@ -4438,9 +4518,9 @@ class JIRA:
                 raise JIRAError(f"Error Deactivating {username}: {e}")
         else:
             url = self.server_url + "/secure/admin/user/EditUser.jspa"
-            self._options["headers"][
-                "Content-Type"
-            ] = "application/x-www-form-urlencoded; charset=UTF-8"
+            self._options["headers"]["Content-Type"] = (
+                "application/x-www-form-urlencoded; charset=UTF-8"
+            )
             user = self.user(username)
             userInfo = {
                 "inline": "true",
@@ -5242,6 +5322,7 @@ class JIRA:
         startDate: Any | None = None,
         endDate: Any | None = None,
         state: str | None = None,
+        goal: str | None = None,
     ) -> dict[str, Any]:
         """Updates the sprint with the given values.
 
@@ -5250,7 +5331,8 @@ class JIRA:
             name (Optional[str]): The name to update your sprint to
             startDate (Optional[Any]): The start date for the sprint
             endDate (Optional[Any]): The start date for the sprint
-            state: (Optional[str]): The start date for the sprint
+            state: (Optional[str]): The state of the sprint
+            goal: (Optional[str]): The goal of the sprint
 
         Returns:
             Dict[str, Any]
@@ -5264,6 +5346,8 @@ class JIRA:
             payload["endDate"] = endDate
         if state:
             payload["state"] = state
+        if goal:
+            payload["goal"] = goal
 
         url = self._get_url(f"sprint/{id}", base=self.AGILE_BASE_URL)
         r = self._session.put(url, data=json.dumps(payload))
@@ -5393,6 +5477,7 @@ class JIRA:
         board_id: int,
         startDate: Any | None = None,
         endDate: Any | None = None,
+        goal: str | None = None,
     ) -> Sprint:
         """Create a new sprint for the ``board_id``.
 
@@ -5401,6 +5486,7 @@ class JIRA:
             board_id (int): Which board the sprint should be assigned.
             startDate (Optional[Any]): Start date for the sprint.
             endDate (Optional[Any]): End date for the sprint.
+            goal (Optional[str]): Goal for the sprint.
 
         Returns:
             Sprint: The newly created Sprint
@@ -5410,14 +5496,16 @@ class JIRA:
             payload["startDate"] = startDate
         if endDate:
             payload["endDate"] = endDate
+        if goal:
+            payload["goal"] = goal
 
-        raw_issue_json: dict[str, Any]
+        raw_sprint_json: dict[str, Any]
         url = self._get_url("sprint", base=self.AGILE_BASE_URL)
         payload["originBoardId"] = board_id
         r = self._session.post(url, data=json.dumps(payload))
-        raw_issue_json = json_loads(r)
+        raw_sprint_json = json_loads(r)
 
-        return Sprint(self._options, self._session, raw=raw_issue_json)
+        return Sprint(self._options, self._session, raw=raw_sprint_json)
 
     def add_issues_to_sprint(self, sprint_id: int, issue_keys: list[str]) -> Response:
         """Add the issues in ``issue_keys`` to the ``sprint_id``.
