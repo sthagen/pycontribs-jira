@@ -546,7 +546,7 @@ class JIRA:
             get_server_info (bool): True fetches server version info first to determine if some API calls are available. (Default: ``True``).
             async_ (bool): True enables async requests for those actions where we implemented it, like issue update() or delete(). (Default: ``False``).
             async_workers (int): Set the number of worker threads for async operations.
-            timeout (Optional[Union[Union[float, int], Tuple[float, float]]]): Set a read/connect timeout for the underlying calls to Jira.
+            timeout (Optional[Union[Union[float, int], Tuple[float, float]]]): Set a connect/read timeout for the underlying calls to Jira.
               Obviously this means that you cannot rely on the return code when this is enabled.
             max_retries (int): Sets the amount Retries for the HTTP sessions initiated by the client. (Default: ``3``)
             proxies (Optional[Any]): Sets the proxies for the HTTP session.
@@ -2337,12 +2337,22 @@ class JIRA:
         return True
 
     @translate_resource_args
-    def comments(self, issue: int | str, expand: str | None = None) -> list[Comment]:
+    def comments(
+        self,
+        issue: int | str,
+        expand: str | None = None,
+        start_at: int | None = None,
+        max_results: int | None = None,
+        order_by: str | None = None,
+    ) -> list[Comment]:
         """Get a list of comment Resources of the issue provided.
 
         Args:
             issue (Union[int, str]): the issue ID or key to get the comments from
             expand (Optional[str]): extra information to fetch for each comment such as renderedBody and properties.
+            start_at (Optional[int]): index of the first comment to return (page offset)
+            max_results (Optional[int]): maximum number of comments to return
+            order_by (Optional[str]): order of the comments to return; should be 'created', '+created' or '-created'.
 
         Returns:
             List[Comment]
@@ -2350,6 +2360,12 @@ class JIRA:
         params = {}
         if expand is not None:
             params["expand"] = expand
+        if start_at is not None:
+            params["startAt"] = str(start_at)
+        if max_results is not None:
+            params["maxResults"] = str(max_results)
+        if order_by is not None:
+            params["orderBy"] = order_by
         r_json = self._get_json(f"issue/{issue}/comment", params=params)
 
         comments = [
@@ -3695,7 +3711,7 @@ class JIRA:
               Total number of results is available in the ``total`` attribute of the returned :class:`ResultList`.
               If maxResults evaluates to False, it will try to get all issues in batches. (Default: ``50``)
             fields (Optional[Union[str, List[str]]]): comma-separated string or list of issue fields to include in the results.
-              Default is to include all fields.
+              Default is to include all fields If you don't require fields, set it to empty string ``''``.
             expand (Optional[str]): extra information to fetch inside each resource.
             reconcileIssues (Optional[List[int]]): List of issue IDs to reconcile.
             properties (Optional[str]): extra properties to fetch inside each result
@@ -3705,19 +3721,23 @@ class JIRA:
         Returns:
             Union[Dict, ResultList]: JSON Dict if ``json_result=True``, otherwise a `ResultList`.
         """
-        if isinstance(fields, str):
-            fields = fields.split(",")
-        elif fields is None:
+        if fields is None:
             fields = ["*all"]
+        elif fields and isinstance(fields, str):
+            fields = fields.split(",")
+        else:
+            # this is required only for mypy validation
+            fields = []
 
-        # this will translate JQL field names to REST API Name
-        # most people do know the JQL names so this will help them use the API easier
         untranslate = {}  # use to add friendly aliases when we get the results back
-        if self._fields_cache:
-            for i, field in enumerate(fields):
-                if field in self._fields_cache:
-                    untranslate[self._fields_cache[field]] = fields[i]
-                    fields[i] = self._fields_cache[field]
+        if fields:
+            # this will translate JQL field names to REST API Name
+            # most people do know the JQL names so this will help them use the API easier
+            if self._fields_cache:
+                for i, field in enumerate(fields):
+                    if field in self._fields_cache:
+                        untranslate[self._fields_cache[field]] = fields[i]
+                        fields[i] = self._fields_cache[field]
 
         search_params: dict[str, Any] = {
             "jql": jql_str,
@@ -3825,7 +3845,7 @@ class JIRA:
         return j
 
     def myself(self) -> dict[str, Any]:
-        """Get a dict of server information for this Jira instance.
+        """Get a dict of client information for this Jira instance.
 
         Returns:
             Dict[str, Any]
@@ -4396,7 +4416,7 @@ class JIRA:
             from oauthlib.oauth1 import SIGNATURE_RSA as FALLBACK_SHA
         except ImportError:
             FALLBACK_SHA = DEFAULT_SHA
-            _logging.debug("Fallback SHA 'SIGNATURE_RSA_SHA1' could not be imported.")
+            self.log.debug("Fallback SHA 'SIGNATURE_RSA_SHA1' could not be imported.")
 
         for sha_type in (oauth.get("signature_method"), DEFAULT_SHA, FALLBACK_SHA):
             if sha_type is None:
@@ -4411,10 +4431,10 @@ class JIRA:
             self._session.auth = oauth_instance
             try:
                 self.myself()
-                _logging.debug(f"OAuth1 succeeded with signature_method={sha_type}")
+                self.log.debug(f"OAuth1 succeeded with signature_method={sha_type}")
                 return  # successful response, return with happy session
             except JIRAError:
-                _logging.exception(
+                self.log.exception(
                     f"Failed to create OAuth session with signature_method={sha_type}.\n"
                     + "Attempting fallback method(s)."
                     + "Consider specifying the signature via oauth['signature_method']."

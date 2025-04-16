@@ -41,7 +41,7 @@ jobs:
           python -m pip install --upgrade tox tox-gh-actions
 
       - name: Test with tox
-        run: tox -e py310 -- -m allow_on_cloud
+        run: tox run -e py310 -- -m allow_on_cloud
         env:
           CI_JIRA_TYPE: CLOUD
           CI_JIRA_CLOUD_ADMIN: ${{ secrets.CLOUD_ADMIN }}
@@ -52,5 +52,5 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          file: ./coverage.xml
+          files: ./coverage.xml
           name: ${{ runner.os }}-${{ matrix.python-version }}-Cloud
