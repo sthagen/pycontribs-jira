@@ -26,7 +26,7 @@ jobs:
         jira-version: [8.17.1]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.ref }}
 
@@ -34,7 +34,7 @@ jobs:
         run: docker run -dit -p 2990:2990 --name jira addono/jira-software-standalone --version ${{ matrix.jira-version }}
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip

@@ -66,7 +66,7 @@ jobs:
           sudo apt-get update -y
           sudo apt-get --assume-yes --no-install-recommends install -y apt-transport-https curl libkrb5-dev
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # needed by setuptools-scm
           submodules: true
@@ -80,7 +80,7 @@ jobs:
           key: pre-commit-${{ matrix.name }}-${{ hashFiles('.pre-commit-config.yaml') }}
 
       - name: Set up Python ${{ matrix.python_version || '3.10' }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           cache: pip
           python-version: ${{ matrix.python_version || '3.10' }}
@@ -138,10 +138,10 @@ jobs:
 
     steps:
       # checkout needed for codecov action which needs codecov.yml file
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python # likely needed for coverage
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -157,7 +157,7 @@ jobs:
           separate-directories: true
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         continue-on-error: true # to allow rerunning this job
         with:
           name: logs.zip
