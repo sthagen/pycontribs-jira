@@ -67,7 +67,7 @@ jobs:
           CI_JIRA_TYPE: SERVER
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           # tox writes coverage.xml under .tox/<env>/; codecov's
           # auto-search picks it up from there.
